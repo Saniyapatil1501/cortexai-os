@@ -1,0 +1,56 @@
+# Dependency Directories
+node_modules/
+/dist/
+/dist-ssr/
+/dist-electron/
+/.output/
+/.vinxi/
+/.tanstack/
+/.nitro/
+
+# Python / FastAPI Virtual Environments & Caches
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Databases & Local Storage
+*.db
+*.db-journal
+*.sqlite
+cortexai.db
+cortexai.db-journal
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.development
+.env.production
+.env.development.local
+.env.production.local
+.dev.vars
+
+# Cloudflare / Wrangler Caches
+.wrangler/
+
+# System Files & Editor Directories
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# IDE & Generation Artifacts
+.lovable/

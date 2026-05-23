@@ -1,0 +1,239 @@
+from fastapi import APIRouter, Depends
+from sqlmodel import Session, select
+from app.database import get_session
+from app.models import ActivityLog
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime, timedelta
+
+router = APIRouter()
+
+class ActivityLogCreate(BaseModel):
+    user_id: int
+    app_name: str
+    window_title: Optional[str] = None
+    duration_seconds: int
+    category: str
+    productivity_score: int
+
+@router.post("/log")
+def create_activity_log(data: ActivityLogCreate, session: Session = Depends(get_session)):
+    log = ActivityLog(
+        user_id=data.user_id,
+        app_name=data.app_name,
+        window_title=data.window_title,
+        duration_seconds=data.duration_seconds,
+        category=data.category,
+        productivity_score=data.productivity_score,
+        timestamp=datetime.utcnow()
+    )
+    session.add(log)
+    session.commit()
+    session.refresh(log)
+    return log
+
+@router.get("/summary/{user_id}")
+def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends(get_session)):
+    limit_date = datetime.utcnow() - timedelta(days=days)
+    statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
+    logs = session.exec(statement).all()
+    
+    # Calculate sum of productivity metrics
+    total_duration = sum(l.duration_seconds for l in logs)
+    code_duration = sum(l.duration_seconds for l in logs if l.category == "code")
+    study_duration = sum(l.duration_seconds for l in logs if l.category == "study")
+    distr_duration = sum(l.duration_seconds for l in logs if l.category == "distraction")
+    
+    # Calculate today's metrics
+    start_of_today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_logs = [l for l in logs if l.timestamp >= start_of_today]
+    today_code = sum(l.duration_seconds for l in today_logs if l.category == "code")
+    today_study = sum(l.duration_seconds for l in today_logs if l.category == "study")
+    today_distr = sum(l.duration_seconds for l in today_logs if l.category == "distraction")
+    
+    today_distr_count = sum(1 for l in today_logs if l.category == "distraction")
+    
+    # Today's focus sessions count
+    from app.models import FocusSession
+    focus_statement = select(FocusSession).where(
+        FocusSession.user_id == user_id,
+        FocusSession.started_at >= start_of_today,
+        FocusSession.completed == True
+    )
+    today_sessions = session.exec(focus_statement).all()
+    today_sessions_count = len(today_sessions)
+    
+    return {
+        "total_seconds": total_duration,
+        "categories": {
+            "code": code_duration,
+            "study": study_duration,
+            "distraction": distr_duration
+        },
+        "score": 87 if total_duration == 0 else int((code_duration + study_duration - distr_duration) / max(total_duration, 1) * 100),
+        "today": {
+            "focus_seconds": today_code + today_study,
+            "distraction_seconds": today_distr,
+            "distraction_count": today_distr_count,
+            "sessions_count": today_sessions_count
+        }
+    }
+
+@router.get("/analytics/productivity/{user_id}")
+def get_productivity_analytics(user_id: int, session: Session = Depends(get_session)):
+    limit_date = datetime.utcnow() - timedelta(days=14)
+    statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
+    logs = session.exec(statement).all()
+    
+    today = datetime.utcnow().date()
+    days = [today - timedelta(days=i) for i in range(13, -1, -1)]
+    
+    data = {d: {"focus": 0.0, "distraction": 0.0} for d in days}
+    for log in logs:
+        log_date = log.timestamp.date()
+        if log_date in data:
+            hours = log.duration_seconds / 3600.0
+            if log.category in ["code", "study"]:
+                data[log_date]["focus"] += hours
+            elif log.category == "distraction":
+                data[log_date]["distraction"] += hours
+                
+    return [
+        {
+            "day": d.strftime("%b %d"),
+            "focus": round(data[d]["focus"], 2),
+            "distraction": round(data[d]["distraction"], 2)
+        }
+        for d in days
+    ]
+
+@router.get("/analytics/heatmap/{user_id}")
+def get_heatmap_analytics(user_id: int, session: Session = Depends(get_session)):
+    statement = select(ActivityLog).where(
+        ActivityLog.user_id == user_id,
+        ActivityLog.category.in_(["code", "study"])
+    )
+    logs = session.exec(statement).all()
+    
+    grid = [[0.0 for _ in range(24)] for _ in range(7)]
+    for log in logs:
+        w = log.timestamp.weekday()
+        h = log.timestamp.hour
+        grid[w][h] += log.duration_seconds
+        
+    max_val = max(max(row) for row in grid) if grid else 0
+    if max_val > 0:
+        normalized_grid = [[round(val / max_val, 2) for val in row] for row in grid]
+    else:
+        normalized_grid = grid
+        
+    return normalized_grid
+
+@router.get("/analytics/apps/{user_id}")
+def get_apps_analytics(user_id: int, session: Session = Depends(get_session)):
+    start_of_today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= start_of_today)
+    logs = session.exec(statement).all()
+    
+    app_durations = {}
+    app_categories = {}
+    for log in logs:
+        raw_name = log.app_name.lower()
+        pretty_name = log.app_name
+        if "code" in raw_name:
+            pretty_name = "VS Code"
+        elif "chrome" in raw_name:
+            pretty_name = "Google Chrome"
+        elif "firefox" in raw_name:
+            pretty_name = "Firefox"
+        elif "edge" in raw_name:
+            pretty_name = "Microsoft Edge"
+        elif "spotify" in raw_name:
+            pretty_name = "Spotify"
+        elif "discord" in raw_name:
+            pretty_name = "Discord"
+        elif "slack" in raw_name:
+            pretty_name = "Slack"
+        elif "terminal" in raw_name or "cmd.exe" in raw_name or "powershell" in raw_name:
+            pretty_name = "Terminal"
+            
+        app_durations[pretty_name] = app_durations.get(pretty_name, 0) + log.duration_seconds
+        app_categories[pretty_name] = log.category
+        
+    total_sec = sum(app_durations.values())
+    
+    result = []
+    for name, secs in app_durations.items():
+        hours = secs // 3600
+        minutes = (secs % 3600) // 60
+        time_str = ""
+        if hours > 0:
+            time_str += f"{hours}h "
+        time_str += f"{minutes}m"
+        
+        pct = int(secs / max(total_sec, 1) * 100)
+        
+        result.append({
+            "name": name,
+            "time": time_str,
+            "pct": pct,
+            "type": app_categories[name]
+        })
+        
+    result.sort(key=lambda x: x["pct"], reverse=True)
+    return result
+
+@router.get("/analytics/distractions/{user_id}")
+def get_distractions_analytics(user_id: int, session: Session = Depends(get_session)):
+    limit_date = datetime.utcnow() - timedelta(days=12)
+    statement = select(ActivityLog).where(
+        ActivityLog.user_id == user_id,
+        ActivityLog.timestamp >= limit_date,
+        ActivityLog.category == "distraction"
+    )
+    logs = session.exec(statement).all()
+    
+    today = datetime.utcnow().date()
+    days = [today - timedelta(days=i) for i in range(11, -1, -1)]
+    
+    counts = {d: 0 for d in days}
+    for log in logs:
+        log_date = log.timestamp.date()
+        if log_date in counts:
+            counts[log_date] += 1
+            
+    return [
+        {
+            "d": d.strftime("%b %d"),
+            "v": counts[d]
+        }
+        for d in days
+    ]
+
+@router.get("/analytics/weekly_hours/{user_id}")
+def get_weekly_hours_analytics(user_id: int, session: Session = Depends(get_session)):
+    limit_date = datetime.utcnow() - timedelta(days=7)
+    statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
+    logs = session.exec(statement).all()
+    
+    today = datetime.utcnow().date()
+    days = [today - timedelta(days=i) for i in range(6, -1, -1)]
+    
+    data = {d: {"code": 0.0, "study": 0.0} for d in days}
+    for log in logs:
+        log_date = log.timestamp.date()
+        if log_date in data:
+            hours = log.duration_seconds / 3600.0
+            if log.category == "code":
+                data[log_date]["code"] += hours
+            elif log.category == "study":
+                data[log_date]["study"] += hours
+                
+    return [
+        {
+            "d": d.strftime("%a"),
+            "code": round(data[d]["code"], 2),
+            "study": round(data[d]["study"], 2)
+        }
+        for d in days
+    ]
