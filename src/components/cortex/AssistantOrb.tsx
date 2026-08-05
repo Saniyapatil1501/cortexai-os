@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, X, Mic } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 
 /**
  * Floating CortexAI presence orb. Persistent across the app.
  * Breathes calmly, expands into a quick command panel on click.
  */
 export function AssistantOrb() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<"idle" | "thinking" | "listening">("idle");
 
@@ -17,6 +19,13 @@ export function AssistantOrb() {
     }, 9000);
     return () => clearInterval(i);
   }, []);
+
+  const handleAction = (promptText: string) => {
+    setOpen(false);
+    sessionStorage.setItem("cortex_auto_prompt", promptText);
+    navigate({ to: "/assistant" });
+    window.dispatchEvent(new CustomEvent("cortex:prompt", { detail: promptText }));
+  };
 
   return (
     <div className="fixed bottom-5 right-5 z-40 select-none">
@@ -49,7 +58,8 @@ export function AssistantOrb() {
               {["Summarize current focus", "Plan the next 90 minutes", "Mute distractions"].map((t) => (
                 <button
                   key={t}
-                  className="w-full rounded-md px-3 py-2 text-left text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground transition"
+                  onClick={() => handleAction(t)}
+                  className="w-full rounded-md px-3 py-2 text-left text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground transition cursor-pointer"
                 >
                   {t}
                 </button>
@@ -57,8 +67,8 @@ export function AssistantOrb() {
             </div>
             <div className="mt-2 flex gap-2 border-t border-border pt-2">
               <button
-                onClick={() => setState((s) => (s === "listening" ? "idle" : "listening"))}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs hover:bg-surface-2"
+                onClick={() => handleAction("Activate voice dictation")}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-md border border-border bg-surface-1 px-2 py-1.5 text-xs hover:bg-surface-2 cursor-pointer"
               >
                 <Mic className="h-3 w-3" /> Voice
               </button>

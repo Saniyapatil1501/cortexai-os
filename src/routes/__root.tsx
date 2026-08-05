@@ -7,8 +7,31 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { ClerkProvider } from "@clerk/clerk-react";
+import { CortexAuthProvider } from "../hooks/useCortexAuth";
+import React, { useState, useEffect } from "react";
+import { Sparkles, KeyRound, ArrowRight } from "lucide-react";
+import { cortexClient } from "../lib/api";
 
 import appCss from "../styles.css?url";
+
+// Clerk Publishable Key loader
+const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || "";
+
+import * as Sentry from "@sentry/react";
+
+if (typeof window !== "undefined") {
+  const sentryDsn = import.meta.env.VITE_SENTRY_DSN || "";
+  if (sentryDsn) {
+    Sentry.init({
+      dsn: sentryDsn,
+      integrations: [
+        Sentry.browserTracingIntegration(),
+      ],
+      tracesSampleRate: 1.0,
+    });
+  }
+}
 
 function NotFoundComponent() {
   return (
@@ -45,6 +68,11 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
         <p className="mt-2 text-sm text-muted-foreground">
           Something went wrong on our end. You can try refreshing or head back home.
         </p>
+        {error && (
+          <div className="mt-4 max-w-sm mx-auto text-left rounded bg-surface-2 p-3 font-mono text-[11px] border border-border text-red-400 overflow-x-auto whitespace-pre-wrap select-all">
+            {error.message || String(error)}
+          </div>
+        )}
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
             onClick={() => {
@@ -98,6 +126,7 @@ function RootShell({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <head>
+        <meta httpEquiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.clerk.accounts.dev https://clerk.accounts.dev https://challenges.cloudflare.com; connect-src 'self' http://127.0.0.1:8000 ws://localhost:3000 ws://127.0.0.1:3000 https://*.clerk.accounts.dev https://api.clerk.com https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com https://*.clerk.accounts.dev https://clerk.accounts.dev; img-src 'self' data: https://images.clerk-cdn.com https://img.clerk.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com;" />
         <HeadContent />
       </head>
       <body>
@@ -111,9 +140,36 @@ function RootShell({ children }: { children: React.ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
+  if (!CLERK_PUBLISHABLE_KEY) {
+    console.error("Missing Clerk Publishable Key! Please ensure VITE_CLERK_PUBLISHABLE_KEY is configured in your environment.");
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6 bg-background text-foreground">
+        <div className="max-w-md w-full rounded-lg border border-border bg-surface-1/90 p-8 text-center shadow-2xl">
+          <div className="h-12 w-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-4">
+            <KeyRound className="h-6 w-6" />
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">Configuration Required</h1>
+          <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
+            CortexAI requires a Clerk Publishable Key to initialize authentication.
+          </p>
+          <div className="mt-5 text-left rounded bg-surface-2 p-3 font-mono text-xs border border-border select-all text-muted-foreground">
+            VITE_CLERK_PUBLISHABLE_KEY=pk_test_...
+          </div>
+          <p className="mt-4 text-xs text-muted-foreground">
+            Please paste your key in the root <code className="bg-surface-2 px-1 py-0.5 rounded text-foreground">.env</code> file and restart the application.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <QueryClientProvider client={queryClient}>
-      <Outlet />
-    </QueryClientProvider>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+      <CortexAuthProvider>
+        <QueryClientProvider client={queryClient}>
+          <Outlet />
+        </QueryClientProvider>
+      </CortexAuthProvider>
+    </ClerkProvider>
   );
 }

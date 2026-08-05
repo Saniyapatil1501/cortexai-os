@@ -1,12 +1,47 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlmodel import Session, select
 from app.database import get_session
-from app.models import ActivityLog
+from app.api.auth import verify_user_access
+from app.models import ActivityLog, UserSettings
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
+import zoneinfo
 
 router = APIRouter()
+
+def get_start_of_today_utc(user_id: int, db_session: Session) -> datetime:
+    # Query timezone from UserSettings
+    statement = select(UserSettings).where(UserSettings.user_id == user_id)
+    settings = db_session.exec(statement).first()
+    
+    tz_name = "UTC"
+    if settings and settings.timezone:
+        tz_name = settings.timezone
+        
+    try:
+        tz = zoneinfo.ZoneInfo(tz_name)
+        # Get current time in user's timezone
+        now_tz = datetime.now(tz)
+        # Get start of today in user's timezone
+        start_of_today_tz = now_tz.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Convert start of today back to UTC
+        return start_of_today_tz.astimezone(zoneinfo.ZoneInfo("UTC")).replace(tzinfo=None)
+    except Exception as e:
+        print(f"Error computing local timezone start_of_today (falling back to UTC): {str(e)}")
+        # Fallback to simple UTC start of day
+        return datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+def to_user_timezone(utc_dt: datetime, tz_name: Optional[str]) -> datetime:
+    if not tz_name:
+        return utc_dt
+    try:
+        # Give the naive UTC dt timezone info
+        utc_aware = utc_dt.replace(tzinfo=zoneinfo.ZoneInfo("UTC"))
+        # Convert to local timezone and remove tzinfo (to keep it naive for comparison/formatting)
+        return utc_aware.astimezone(zoneinfo.ZoneInfo(tz_name)).replace(tzinfo=None)
+    except Exception:
+        return utc_dt
 
 class ActivityLogCreate(BaseModel):
     user_id: int
@@ -17,7 +52,8 @@ class ActivityLogCreate(BaseModel):
     productivity_score: int
 
 @router.post("/log")
-def create_activity_log(data: ActivityLogCreate, session: Session = Depends(get_session)):
+def create_activity_log(data: ActivityLogCreate, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
+    verify_user_access(data.user_id, authorization, session)
     log = ActivityLog(
         user_id=data.user_id,
         app_name=data.app_name,
@@ -33,7 +69,7 @@ def create_activity_log(data: ActivityLogCreate, session: Session = Depends(get_
     return log
 
 @router.get("/summary/{user_id}")
-def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends(get_session)):
+def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     limit_date = datetime.utcnow() - timedelta(days=days)
     statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
     logs = session.exec(statement).all()
@@ -45,13 +81,26 @@ def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends
     distr_duration = sum(l.duration_seconds for l in logs if l.category == "distraction")
     
     # Calculate today's metrics
-    start_of_today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_today = get_start_of_today_utc(user_id, session)
     today_logs = [l for l in logs if l.timestamp >= start_of_today]
     today_code = sum(l.duration_seconds for l in today_logs if l.category == "code")
     today_study = sum(l.duration_seconds for l in today_logs if l.category == "study")
     today_distr = sum(l.duration_seconds for l in today_logs if l.category == "distraction")
     
-    today_distr_count = sum(1 for l in today_logs if l.category == "distraction")
+    # Calculate today's distraction count using state-transition checks
+    sorted_today_logs = sorted(today_logs, key=lambda x: x.timestamp)
+    today_distr_count = 0
+    last_was_distraction = False
+    last_distraction_app = None
+    for l in sorted_today_logs:
+        if l.category == "distraction":
+            if not last_was_distraction or (last_distraction_app and l.app_name != last_distraction_app):
+                today_distr_count += 1
+            last_was_distraction = True
+            last_distraction_app = l.app_name
+        else:
+            last_was_distraction = False
+            last_distraction_app = None
     
     # Today's focus sessions count
     from app.models import FocusSession
@@ -70,7 +119,7 @@ def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends
             "study": study_duration,
             "distraction": distr_duration
         },
-        "score": 87 if total_duration == 0 else int((code_duration + study_duration - distr_duration) / max(total_duration, 1) * 100),
+        "score": 0 if total_duration == 0 else max(0, int((code_duration + study_duration - distr_duration) / max(total_duration, 1) * 100)),
         "today": {
             "focus_seconds": today_code + today_study,
             "distraction_seconds": today_distr,
@@ -80,17 +129,27 @@ def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends
     }
 
 @router.get("/analytics/productivity/{user_id}")
-def get_productivity_analytics(user_id: int, session: Session = Depends(get_session)):
+def get_productivity_analytics(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     limit_date = datetime.utcnow() - timedelta(days=14)
     statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
     logs = session.exec(statement).all()
     
-    today = datetime.utcnow().date()
+    # Get user settings timezone
+    settings_statement = select(UserSettings).where(UserSettings.user_id == user_id)
+    settings = session.exec(settings_statement).first()
+    tz_name = settings.timezone if settings else "UTC"
+    
+    try:
+        local_now = datetime.now(zoneinfo.ZoneInfo(tz_name))
+    except Exception:
+        local_now = datetime.utcnow()
+    today = local_now.date()
     days = [today - timedelta(days=i) for i in range(13, -1, -1)]
     
     data = {d: {"focus": 0.0, "distraction": 0.0} for d in days}
     for log in logs:
-        log_date = log.timestamp.date()
+        local_time = to_user_timezone(log.timestamp, tz_name)
+        log_date = local_time.date()
         if log_date in data:
             hours = log.duration_seconds / 3600.0
             if log.category in ["code", "study"]:
@@ -108,7 +167,7 @@ def get_productivity_analytics(user_id: int, session: Session = Depends(get_sess
     ]
 
 @router.get("/analytics/heatmap/{user_id}")
-def get_heatmap_analytics(user_id: int, session: Session = Depends(get_session)):
+def get_heatmap_analytics(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     statement = select(ActivityLog).where(
         ActivityLog.user_id == user_id,
         ActivityLog.category.in_(["code", "study"])
@@ -130,8 +189,8 @@ def get_heatmap_analytics(user_id: int, session: Session = Depends(get_session))
     return normalized_grid
 
 @router.get("/analytics/apps/{user_id}")
-def get_apps_analytics(user_id: int, session: Session = Depends(get_session)):
-    start_of_today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+def get_apps_analytics(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
+    start_of_today = get_start_of_today_utc(user_id, session)
     statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= start_of_today)
     logs = session.exec(statement).all()
     
@@ -184,7 +243,7 @@ def get_apps_analytics(user_id: int, session: Session = Depends(get_session)):
     return result
 
 @router.get("/analytics/distractions/{user_id}")
-def get_distractions_analytics(user_id: int, session: Session = Depends(get_session)):
+def get_distractions_analytics(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     limit_date = datetime.utcnow() - timedelta(days=12)
     statement = select(ActivityLog).where(
         ActivityLog.user_id == user_id,
@@ -193,12 +252,21 @@ def get_distractions_analytics(user_id: int, session: Session = Depends(get_sess
     )
     logs = session.exec(statement).all()
     
-    today = datetime.utcnow().date()
+    settings_statement = select(UserSettings).where(UserSettings.user_id == user_id)
+    settings = session.exec(settings_statement).first()
+    tz_name = settings.timezone if settings else "UTC"
+    
+    try:
+        local_now = datetime.now(zoneinfo.ZoneInfo(tz_name))
+    except Exception:
+        local_now = datetime.utcnow()
+    today = local_now.date()
     days = [today - timedelta(days=i) for i in range(11, -1, -1)]
     
     counts = {d: 0 for d in days}
     for log in logs:
-        log_date = log.timestamp.date()
+        local_time = to_user_timezone(log.timestamp, tz_name)
+        log_date = local_time.date()
         if log_date in counts:
             counts[log_date] += 1
             
@@ -209,19 +277,28 @@ def get_distractions_analytics(user_id: int, session: Session = Depends(get_sess
         }
         for d in days
     ]
-
+ 
 @router.get("/analytics/weekly_hours/{user_id}")
-def get_weekly_hours_analytics(user_id: int, session: Session = Depends(get_session)):
+def get_weekly_hours_analytics(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     limit_date = datetime.utcnow() - timedelta(days=7)
     statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
     logs = session.exec(statement).all()
     
-    today = datetime.utcnow().date()
+    settings_statement = select(UserSettings).where(UserSettings.user_id == user_id)
+    settings = session.exec(settings_statement).first()
+    tz_name = settings.timezone if settings else "UTC"
+    
+    try:
+        local_now = datetime.now(zoneinfo.ZoneInfo(tz_name))
+    except Exception:
+        local_now = datetime.utcnow()
+    today = local_now.date()
     days = [today - timedelta(days=i) for i in range(6, -1, -1)]
     
     data = {d: {"code": 0.0, "study": 0.0} for d in days}
     for log in logs:
-        log_date = log.timestamp.date()
+        local_time = to_user_timezone(log.timestamp, tz_name)
+        log_date = local_time.date()
         if log_date in data:
             hours = log.duration_seconds / 3600.0
             if log.category == "code":

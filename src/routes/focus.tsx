@@ -2,6 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Pause, Play, RotateCcw, Volume2 } from "lucide-react";
 import { cortexClient, FocusSession } from "@/lib/api";
+import { AppLayout } from "@/components/cortex/AppLayout";
+import { Card, PageHeader, Button } from "@/components/cortex/ui";
+import { motion } from "framer-motion";
+import { useCortexAuth } from "@/hooks/useCortexAuth";
+import { parseUTCDateTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/focus")({
   head: () => ({
@@ -14,30 +19,42 @@ export const Route = createFileRoute("/focus")({
 });
 
 function FocusPage() {
+  const { user } = useCortexAuth();
+  const userId = user?.user_id;
+
   const [activeSession, setActiveSession] = useState<FocusSession | null>(null);
   const [intention, setIntention] = useState("Finish authentication refactor");
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState(0); // seconds
   const [distractions, setDistractions] = useState({ tabSwitch: 0, appSwap: 0, idle: 0 });
   const [todayStats, setTodayStats] = useState({ sessions: 0, focusMinutes: 0 });
-  const total = 50 * 60; // 50 minutes
+  
+  // Total default duration (50 minutes) or dynamic target duration from backend active session
+  const total = activeSession?.target_duration_seconds || 50 * 60;
 
   // Fetch active session and stats on mount
   useEffect(() => {
-    cortexClient.getActiveFocusSession(1).then((sess) => {
+    if (!userId) return;
+
+    cortexClient.getActiveFocusSession(userId).then((sess) => {
       if (sess) {
         setActiveSession(sess);
         setIntention(sess.intention);
         setRunning(true);
         // Calculate elapsed seconds since start
-        const startTime = new Date(sess.started_at).getTime();
+        const startTime = parseUTCDateTime(sess.started_at).getTime();
         const diffSecs = Math.max(0, Math.floor((Date.now() - startTime) / 1000));
-        setElapsed(Math.min(diffSecs, total));
-        setDistractions(prev => ({ ...prev, tabSwitch: sess.distraction_count }));
+        const target = sess.target_duration_seconds || 50 * 60;
+        setElapsed(Math.min(diffSecs, target));
+        setDistractions({
+          tabSwitch: sess.distraction_count,
+          appSwap: sess.app_swaps || 0,
+          idle: sess.idle_count || 0
+        });
       }
     });
 
-    cortexClient.getActivitySummary(1).then((sum) => {
+    cortexClient.getActivitySummary(userId).then((sum) => {
       if (sum.today) {
         setTodayStats({
           sessions: sum.today.sessions_count,
@@ -46,58 +63,93 @@ function FocusPage() {
         setDistractions(prev => ({ ...prev, tabSwitch: sum.today?.distraction_count || 0 }));
       }
     });
-  }, []);
+  }, [userId]);
 
   // Update timer tick
   useEffect(() => {
-    if (!running) return;
+    if (!running || !activeSession) return;
     const t = setInterval(() => {
       setElapsed((e) => {
         if (e >= total) {
+          clearInterval(t);
           handleStop(true);
           return total;
         }
         return e + 1;
       });
-      
-      // Periodically refresh distraction count
-      if (activeSession && Math.random() < 0.1) {
-        cortexClient.getActiveFocusSession(1).then((sess) => {
-          if (sess) {
-            setDistractions(prev => ({ ...prev, tabSwitch: sess.distraction_count }));
-          }
-        });
-      }
     }, 1000);
     return () => clearInterval(t);
-  }, [running, activeSession]);
+  }, [running, activeSession, total]);
+
+  // Sync distractions from backend every 5 seconds (low CPU polling)
+  useEffect(() => {
+    if (!running || !activeSession || !userId) return;
+    const syncInterval = setInterval(() => {
+      cortexClient.getActiveFocusSession(userId).then((sess) => {
+        if (sess) {
+          setDistractions({
+            tabSwitch: sess.distraction_count,
+            appSwap: sess.app_swaps || 0,
+            idle: sess.idle_count || 0
+          });
+        }
+      });
+    }, 5000);
+    return () => clearInterval(syncInterval);
+  }, [running, activeSession, userId]);
 
   const handleStart = () => {
-    cortexClient.startFocusSession(1, intention).then((sess) => {
+    if (!userId) return;
+    cortexClient.startFocusSession(userId, intention, 50 * 60).then((sess) => {
       setActiveSession(sess);
       setRunning(true);
       setElapsed(0);
-      setDistractions(prev => ({ ...prev, tabSwitch: 0 }));
+      setDistractions({ tabSwitch: 0, appSwap: 0, idle: 0 });
+      
+      if ((window as any).cortexAPI?.sendNotification) {
+        (window as any).cortexAPI.sendNotification(
+          "Focus Session Started",
+          `Intention: "${intention}"`
+        );
+      }
     });
   };
 
   const handleStop = (completed = false) => {
     if (!activeSession) return;
     cortexClient.endFocusSession(activeSession.id, completed, distractions.tabSwitch).then(() => {
+      if ((window as any).cortexAPI?.sendNotification) {
+        if (completed) {
+          (window as any).cortexAPI.sendNotification(
+            "Focus Session Completed!",
+            "Great job finishing your Pomodoro sprint. Take a break!"
+          );
+        } else {
+          (window as any).cortexAPI.sendNotification(
+            "Focus Session Paused",
+            "Focus session has been stopped manually."
+          );
+        }
+      }
+      
       setActiveSession(null);
       setRunning(false);
       setElapsed(0);
-      // Reload stats
-      cortexClient.getActivitySummary(1).then((sum) => {
-        if (sum.today) {
-          setTodayStats({
-            sessions: sum.today.sessions_count,
-            focusMinutes: Math.round(sum.today.focus_seconds / 60)
-          });
-        }
-      });
+      
+      if (userId) {
+        // Reload stats
+        cortexClient.getActivitySummary(userId).then((sum) => {
+          if (sum.today) {
+            setTodayStats({
+              sessions: sum.today.sessions_count,
+              focusMinutes: Math.round(sum.today.focus_seconds / 60)
+            });
+          }
+        });
+      }
     });
   };
+
 
   const handleReset = () => {
     if (activeSession) {
@@ -170,9 +222,6 @@ function FocusPage() {
               </Button>
               <Button variant="outline" onClick={handleReset}>
                 <RotateCcw className="h-4 w-4" /> Reset
-              </Button>
-              <Button variant="ghost">
-                <Volume2 className="h-4 w-4" /> Ambient
               </Button>
             </div>
           </div>

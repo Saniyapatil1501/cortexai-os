@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useEffect, useState, useRef } from "react";
 import { Send, Mic, Sparkles, Plus, History, Square, Volume2, VolumeX } from "lucide-react";
 import { cortexClient } from "@/lib/api";
+import { useCortexAuth } from "@/hooks/useCortexAuth";
 
 export const Route = createFileRoute("/assistant")({
   head: () => ({
@@ -18,16 +19,6 @@ export const Route = createFileRoute("/assistant")({
 
 type Msg = { role: "user" | "ai"; text: string };
 
-const initial: Msg[] = [
-  { role: "ai", text: "Hey Alex — ready when you are. Want a summary of yesterday's focus blocks?" },
-  { role: "user", text: "Yes, and tell me where I lost the most time." },
-  {
-    role: "ai",
-    text:
-      "Yesterday you logged 5h 48m of deep work across 6 sessions. Most context switching happened between 2:10 PM and 3:00 PM — three tab switches into Slack. Want me to mute notifications during that window today?",
-  },
-];
-
 const prompts = [
   "Summarize my last study session",
   "Plan a 2-hour coding sprint",
@@ -36,37 +27,112 @@ const prompts = [
 ];
 
 function AssistantPage() {
+  const { user } = useCortexAuth();
+  const userId = user?.user_id;
+  const displayName = user?.first_name || "";
+
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [historyItems, setHistoryItems] = useState<string[]>([]);
   const [input, setInput] = useState("");
   const [listening, setListening] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [recognition, setRecognition] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const lastLoadedUserId = useRef<number | null>(null);
 
-  // Load chat history on mount
+  // Load chat history on mount and handle pending prompts
   useEffect(() => {
-    cortexClient.getChatHistory(1)
+    if (!userId || lastLoadedUserId.current === userId) return;
+
+    lastLoadedUserId.current = userId;
+    cortexClient.getChatHistory(userId)
       .then((history) => {
+        let initialMsgs: Msg[] = [];
         if (history && history.length > 0) {
-          setMsgs(history.map((h) => ({ role: h.role === "user" ? "user" : "ai", text: h.content })));
+          initialMsgs = history.map((h) => ({ role: h.role === "user" ? "user" : "ai", text: h.content }));
+          
+          // Dynamically compute unique past user questions for the history list
+          const userPrompts = history
+            .filter((h) => h.role === "user")
+            .map((h) => h.content)
+            .filter((val, idx, self) => self.indexOf(val) === idx);
+          setHistoryItems(userPrompts.slice(-5).reverse());
         } else {
-          setMsgs([
-            { role: "ai", text: "Hey Alex — ready when you are. Ask me about your focus or activity logs!" }
-          ]);
+          initialMsgs = [
+            { role: "ai", text: `Hey ${displayName || "there"} — ready when you are. Ask me about your focus or activity logs!` }
+          ];
+          setHistoryItems([]);
+        }
+
+        // Check for search bar auto-prompt
+        const pendingPrompt = sessionStorage.getItem("cortex_auto_prompt");
+        if (pendingPrompt) {
+          sessionStorage.removeItem("cortex_auto_prompt");
+          setMsgs([...initialMsgs, { role: "user", text: pendingPrompt }, { role: "ai", text: "..." }]);
+          
+          setHistoryItems((prev) => {
+            const next = [pendingPrompt, ...prev.filter((p) => p !== pendingPrompt)];
+            return next.slice(0, 5);
+          });
+          
+          let streamingText = "";
+          cortexClient.chatStream(userId, pendingPrompt, (chunk) => {
+            if (streamingText === "") {
+              streamingText = chunk;
+            } else {
+              streamingText += chunk;
+            }
+            setMsgs((prev) => {
+              const next = [...prev];
+              if (next.length > 0 && next[next.length - 1].role === "ai") {
+                next[next.length - 1] = { role: "ai", text: streamingText };
+              }
+              return next;
+            });
+          }).catch((err) => {
+            console.error(err);
+            setMsgs((prev) => {
+              const next = [...prev];
+              if (next.length > 0 && next[next.length - 1].role === "ai") {
+                next[next.length - 1] = { role: "ai", text: "Error connecting to Cortex daemon. Make sure backend is running." };
+              }
+              return next;
+            });
+          });
+        } else {
+          setMsgs(initialMsgs);
         }
       })
       .catch((err) => {
         console.error("Error loading chat history:", err);
         setMsgs([
-          { role: "ai", text: "Hey Alex — ready when you are. Ask me about your focus or activity logs!" }
+          { role: "ai", text: `Hey ${displayName || "there"} — ready when you are. Ask me about your focus or activity logs!` }
         ]);
+        setHistoryItems([]);
       });
-  }, []);
+  }, [userId, displayName]);
 
   // Auto scroll to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, listening]);
+
+  // Listen for orb custom prompts
+  useEffect(() => {
+    if (!userId) return;
+
+    const handlePromptEvent = (e: Event) => {
+      const customPrompt = (e as CustomEvent).detail;
+      if (customPrompt) {
+        send(customPrompt);
+      }
+    };
+
+    window.addEventListener("cortex:prompt", handlePromptEvent);
+    return () => {
+      window.removeEventListener("cortex:prompt", handlePromptEvent);
+    };
+  }, [userId]);
 
   // Speech Recognition Setup
   useEffect(() => {
@@ -137,7 +203,7 @@ function AssistantPage() {
   };
 
   const send = (text: string, playSpeech = false) => {
-    if (!text.trim()) return;
+    if (!text.trim() || !userId) return;
 
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
@@ -146,8 +212,13 @@ function AssistantPage() {
     setMsgs((m) => [...m, { role: "user", text }, { role: "ai", text: "..." }]);
     setInput("");
 
+    setHistoryItems((prev) => {
+      const next = [text, ...prev.filter((p) => p !== text)];
+      return next.slice(0, 5);
+    });
+
     let streamingText = "";
-    cortexClient.chatStream(1, text, (chunk) => {
+    cortexClient.chatStream(userId, text, (chunk) => {
       if (streamingText === "") {
         streamingText = chunk;
       } else {
@@ -180,8 +251,23 @@ function AssistantPage() {
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
-    setMsgs([{ role: "ai", text: "New conversation started. Ask me anything!" }]);
+    if (userId) {
+      cortexClient.clearChatHistory(userId)
+        .then(() => {
+          setMsgs([{ role: "ai", text: "New conversation started. Ask me anything!" }]);
+          setHistoryItems([]);
+        })
+        .catch((err) => {
+          console.error("Failed to clear chat history in backend:", err);
+          setMsgs([{ role: "ai", text: "New conversation started. Ask me anything!" }]);
+          setHistoryItems([]);
+        });
+    } else {
+      setMsgs([{ role: "ai", text: "New conversation started. Ask me anything!" }]);
+      setHistoryItems([]);
+    }
   };
+
 
   return (
     <AppLayout>
@@ -206,23 +292,23 @@ function AssistantPage() {
           <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm">
             <History className="h-4 w-4 text-muted-foreground" /> History
           </div>
-          <div className="p-2 space-y-1">
-            {[
-              "Focus review · today",
-              "Refactor plan · auth module",
-              "Study plan · DS&A",
-              "Weekly retrospective",
-              "Reading list summary",
-            ].map((t, i) => (
-              <button
-                key={i}
-                className={`w-full rounded-md px-3 py-2 text-left text-sm transition ${
-                  i === 0 ? "bg-surface-2 text-foreground" : "text-muted-foreground hover:bg-surface-2/60"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+          <div className="p-2 space-y-1 overflow-y-auto max-h-[350px]">
+            {historyItems.length > 0 ? (
+              historyItems.map((t, i) => (
+                <button
+                  key={i}
+                  onClick={() => send(t)}
+                  className="w-full rounded-md px-3 py-2 text-left text-sm transition text-muted-foreground hover:bg-surface-2/60 hover:text-foreground truncate block cursor-pointer"
+                  title={t}
+                >
+                  {t}
+                </button>
+              ))
+            ) : (
+              <div className="text-xs text-muted-foreground p-4 text-center select-none">
+                No past questions yet. Ask something to see history!
+              </div>
+            )}
           </div>
         </Card>
 

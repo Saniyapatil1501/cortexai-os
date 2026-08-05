@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, N
 import * as path from "path";
 import { exec, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
+import * as fs from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,11 +15,27 @@ function startBackend() {
   // Determine command path to backend folder
   const isDev = !app.isPackaged;
   const scriptPath = path.join(__dirname, "../backend/main.py");
+  const backendDir = path.join(__dirname, "../backend");
   
   if (isDev) {
     console.log("Launching local FastAPI server in development mode...");
-    // Spawns the local FastAPI python script
-    backendProcess = exec(`python "${scriptPath}"`, (error, stdout, stderr) => {
+    
+    // Prioritize locating local virtual environment python binary
+    let pythonCmd = "python";
+    const venvPythonWindows = path.join(__dirname, "../backend/venv/Scripts/python.exe");
+    const venvPythonUnix = path.join(__dirname, "../backend/venv/bin/python");
+    
+    if (fs.existsSync(venvPythonWindows)) {
+      pythonCmd = `"${venvPythonWindows}"`;
+    } else if (fs.existsSync(venvPythonUnix)) {
+      pythonCmd = `"${venvPythonUnix}"`;
+    }
+    
+    console.log(`Using Python command: ${pythonCmd}`);
+    console.log(`Using Backend working directory: ${backendDir}`);
+    
+    // Spawns the local FastAPI python script with backend folder as working directory
+    backendProcess = exec(`${pythonCmd} "${scriptPath}"`, { cwd: backendDir }, (error, stdout, stderr) => {
       if (error) {
         console.error(`FastAPI daemon error: ${error.message}`);
         return;
@@ -28,6 +45,33 @@ function startBackend() {
       }
       console.log(`FastAPI stdout: ${stdout}`);
     });
+  }
+}
+
+function killBackend() {
+  if (backendProcess && backendProcess.pid) {
+    const pid = backendProcess.pid;
+    console.log(`Terminating backend process tree for PID: ${pid}`);
+    if (process.platform === "win32") {
+      exec(`taskkill /F /T /PID ${pid}`, (error) => {
+        if (error) {
+          console.error(`Error killing process tree on Windows: ${error.message}`);
+        } else {
+          console.log(`Cleaned up process tree for PID ${pid}`);
+        }
+      });
+    } else {
+      try {
+        process.kill(-pid, "SIGKILL");
+        console.log(`Sent SIGKILL to process group ${pid}`);
+      } catch (e: any) {
+        console.error(`Error killing process group on Unix: ${e.message}`);
+        try {
+          backendProcess.kill("SIGKILL");
+        } catch {}
+      }
+    }
+    backendProcess = null;
   }
 }
 
@@ -45,6 +89,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      partition: "persist:cortexai-session",
+      backgroundThrottling: false, // Prevents background timers from throttling when minimized
     },
   });
 
@@ -74,7 +120,7 @@ function createTray() {
     {
       label: "Quit",
       click: () => {
-        backendProcess?.kill();
+        killBackend();
         app.quit();
       },
     },
@@ -85,6 +131,9 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  // Set AppUserModelId for native Windows Toast Notifications
+  app.setAppUserModelId("com.cortexai.os");
+
   startBackend();
   createWindow();
   createTray();
@@ -107,7 +156,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  backendProcess?.kill();
+  killBackend();
   if (process.platform !== "darwin") {
     app.quit();
   }
@@ -121,4 +170,22 @@ ipcMain.handle("notification:trigger", (_, data: { title: string; body: string }
       body: data.body,
     }).show();
   }
+});
+
+ipcMain.on("window:minimize", () => {
+  if (mainWindow) mainWindow.minimize();
+});
+
+ipcMain.on("window:maximize", () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+
+ipcMain.on("window:close", () => {
+  if (mainWindow) mainWindow.close();
 });

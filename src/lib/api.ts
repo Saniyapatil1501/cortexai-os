@@ -1,4 +1,31 @@
-const BASE_URL = "http://127.0.0.1:8000/api";
+const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
+let tokenGetter: (() => Promise<string | null>) | null = null;
+
+async function authedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = { 
+    "Content-Type": "application/json",
+    ...options.headers 
+  } as Record<string, string>;
+  
+  if (tokenGetter) {
+    try {
+      const token = await tokenGetter();
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+    } catch (e) {
+      console.error("Failed to retrieve auth token", e);
+    }
+  }
+  
+  const res = await fetch(url, { ...options, headers });
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => "");
+    throw new Error(`HTTP Error ${res.status}: ${errorText || res.statusText}`);
+  }
+  return res;
+}
 
 export interface UserProfile {
   id: number;
@@ -12,8 +39,11 @@ export interface FocusSession {
   started_at: string;
   ended_at?: string;
   duration_seconds: number;
+  target_duration_seconds?: number;
   distraction_count: number;
   completed: boolean;
+  app_swaps?: number;
+  idle_count?: number;
 }
 
 export interface ActivitySummary {
@@ -24,6 +54,12 @@ export interface ActivitySummary {
     distraction: number;
   };
   score: number;
+  today?: {
+    focus_seconds: number;
+    distraction_seconds: number;
+    distraction_count: number;
+    sessions_count: number;
+  };
 }
 
 export interface ReminderItem {
@@ -34,97 +70,158 @@ export interface ReminderItem {
   is_enabled: boolean;
 }
 
+export interface UserSettingsData {
+  theme: string;
+  proactive_suggestions: boolean;
+  auto_summarize_sessions: boolean;
+  smart_distractions: boolean;
+  long_term_memory: boolean;
+  wake_word: boolean;
+  voice_replies: boolean;
+  voice_tone: string;
+  focus_alerts: boolean;
+  reminders_alerts: boolean;
+  weekly_insights: boolean;
+  daily_focus_target: string;
+  weekly_study_target: string;
+  coding_target: string;
+  break_frequency: string;
+  name?: string;
+  role?: string;
+  timezone?: string;
+}
+
 export const cortexClient = {
-  async login(email: string): Promise<{ user_id: number; email: string }> {
-    const res = await fetch(`${BASE_URL}/auth/login`, {
+  setTokenGetter(getter: () => Promise<string | null>) {
+    tokenGetter = getter;
+  },
+
+  async syncUser(data: {
+    clerk_id: string;
+    email: string;
+    first_name?: string;
+    last_name?: string;
+    profile_image_url?: string;
+    timezone?: string;
+  }): Promise<{
+    status: string;
+    user_id: number;
+    email: string;
+    clerk_id: string;
+    first_name?: string;
+    last_name?: string;
+    profile_image_url?: string;
+    timezone?: string;
+  }> {
+    const res = await authedFetch(`${BASE_URL}/auth/sync`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  async getUserSettings(userId: number): Promise<UserSettingsData> {
+    const res = await authedFetch(`${BASE_URL}/auth/settings/${userId}`);
+    return res.json();
+  },
+
+  async updateUserSettings(userId: number, data: Partial<UserSettingsData>): Promise<UserSettingsData> {
+    const res = await authedFetch(`${BASE_URL}/auth/settings/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  async login(email: string): Promise<{ user_id: number; email: string }> {
+    const res = await authedFetch(`${BASE_URL}/auth/login`, {
+      method: "POST",
       body: JSON.stringify({ email }),
     });
     return res.json();
   },
 
-  async startFocusSession(userId: number, intention: string): Promise<FocusSession> {
-    const res = await fetch(`${BASE_URL}/sessions/start`, {
+  async startFocusSession(userId: number, intention: string, targetDurationSeconds?: number): Promise<FocusSession> {
+    const res = await authedFetch(`${BASE_URL}/sessions/start`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, intention }),
+      body: JSON.stringify({ user_id: userId, intention, target_duration_seconds: targetDurationSeconds }),
     });
     return res.json();
   },
 
   async endFocusSession(sessionId: number, completed: boolean, distractionCount: number): Promise<FocusSession> {
-    const res = await fetch(`${BASE_URL}/sessions/end`, {
+    const res = await authedFetch(`${BASE_URL}/sessions/end`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sessionId, completed, distraction_count: distractionCount }),
     });
     return res.json();
   },
 
   async getActiveFocusSession(userId: number): Promise<FocusSession | null> {
-    const res = await fetch(`${BASE_URL}/sessions/active/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/sessions/active/${userId}`);
     if (res.status === 404) return null;
-    return res.json();
+    try {
+      const data = await res.json();
+      return data;
+    } catch {
+      return null;
+    }
   },
 
   async getActivitySummary(userId: number): Promise<ActivitySummary> {
-    const res = await fetch(`${BASE_URL}/activities/summary/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/activities/summary/${userId}`);
     return res.json();
   },
 
   async getProductivityAnalytics(userId: number): Promise<{ day: string; focus: number; distraction: number }[]> {
-    const res = await fetch(`${BASE_URL}/activities/analytics/productivity/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/activities/analytics/productivity/${userId}`);
     return res.json();
   },
 
   async getHeatmapAnalytics(userId: number): Promise<number[][]> {
-    const res = await fetch(`${BASE_URL}/activities/analytics/heatmap/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/activities/analytics/heatmap/${userId}`);
     return res.json();
   },
 
   async getAppsAnalytics(userId: number): Promise<{ name: string; time: string; pct: number; type: string }[]> {
-    const res = await fetch(`${BASE_URL}/activities/analytics/apps/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/activities/analytics/apps/${userId}`);
     return res.json();
   },
 
   async getDistractionsAnalytics(userId: number): Promise<{ d: string; v: number }[]> {
-    const res = await fetch(`${BASE_URL}/activities/analytics/distractions/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/activities/analytics/distractions/${userId}`);
     return res.json();
   },
 
   async getWeeklyHoursAnalytics(userId: number): Promise<{ d: string; code: number; study: number }[]> {
-    const res = await fetch(`${BASE_URL}/activities/analytics/weekly_hours/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/activities/analytics/weekly_hours/${userId}`);
     return res.json();
   },
 
   async getReminders(userId: number): Promise<ReminderItem[]> {
-    const res = await fetch(`${BASE_URL}/reminders/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/reminders/${userId}`);
     return res.json();
   },
 
   async createReminder(userId: number, title: string, description: string, recurrenceInterval: string): Promise<ReminderItem> {
-    const res = await fetch(`${BASE_URL}/reminders/`, {
+    const res = await authedFetch(`${BASE_URL}/reminders/`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, title, description, recurrence_interval: recurrenceInterval }),
     });
     return res.json();
   },
 
   async updateReminder(reminderId: number, data: { is_enabled?: boolean; title?: string; recurrence_interval?: string }): Promise<ReminderItem> {
-    const res = await fetch(`${BASE_URL}/reminders/${reminderId}`, {
+    const res = await authedFetch(`${BASE_URL}/reminders/${reminderId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     return res.json();
   },
 
   async chatStream(userId: number, message: string, onChunk: (chunk: string) => void): Promise<void> {
-    const response = await fetch(`${BASE_URL}/assistant/chat`, {
+    const response = await authedFetch(`${BASE_URL}/assistant/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ user_id: userId, message }),
     });
 
@@ -141,7 +238,15 @@ export const cortexClient = {
   },
 
   async getChatHistory(userId: number): Promise<{ role: string; content: string }[]> {
-    const res = await fetch(`${BASE_URL}/assistant/history/${userId}`);
+    const res = await authedFetch(`${BASE_URL}/assistant/history/${userId}`);
+    return res.json();
+  },
+
+  async clearChatHistory(userId: number): Promise<{ status: string }> {
+    const res = await authedFetch(`${BASE_URL}/assistant/history/${userId}`, {
+      method: "DELETE",
+    });
     return res.json();
   }
 };
+

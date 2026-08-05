@@ -108,16 +108,36 @@ class ActivityTracker(Thread):
                 
                 if app_name != last_app or window_title != last_title:
                     duration = int(time.time() - start_time)
-                    if last_app and duration >= 2: # Only log if active for more than 2 seconds
-                        self.save_activity(last_app, last_title, duration)
                     
-                    last_app, last_title = app_name, window_title
-                    start_time = time.time()
+                    # Debounce/throttle logic:
+                    # Require at least 5s for an app swap (app_name change)
+                    # Require at least 15s for a same-app window title change
+                    is_app_change = (app_name != last_app)
+                    required_duration = 5 if is_app_change else 15
+                    
+                    if last_app and duration >= required_duration:
+                        self.save_activity(last_app, last_title, duration)
+                        last_app, last_title = app_name, window_title
+                        start_time = time.time()
+                    elif not last_app:
+                        last_app, last_title = app_name, window_title
+                        start_time = time.time()
+                    else:
+                        # If duration was too small to log:
+                        # If it is an app change, let's switch targets immediately to prevent losing tracking time,
+                        # but don't log the transient/temporary state to avoid inflation.
+                        if is_app_change:
+                            last_app, last_title = app_name, window_title
+                            start_time = time.time()
             except Exception as e:
                 print(f"Tracking daemon warning: {str(e)}")
                 time.sleep(2)
 
     def save_activity(self, app_name: str, window_title: str, duration: int):
+        if not self.user_id:
+            print("ActivityTracker: No active user authenticated. Skipping log.")
+            return
+            
         category, score = self.classify_activity(app_name, window_title)
         
         with Session(self.engine) as session:
