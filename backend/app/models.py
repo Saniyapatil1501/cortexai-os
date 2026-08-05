@@ -70,3 +70,25 @@ class ChatMessage(SQLModel, table=True):
     content: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+class Document(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    filename: str
+    original_filename: str
+    file_type: str  # 'pdf', 'txt', 'md'
+    file_path: str
+    file_size: int
+    status: str = Field(default="processing")  # 'processing', 'ready', 'failed'
+    chunk_count: int = Field(default=0)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class DocumentChunk(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    document_id: int = Field(foreign_key="document.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    chunk_index: int
+    content: str
+    token_count: int
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+

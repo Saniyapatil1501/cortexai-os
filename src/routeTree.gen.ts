@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SsoCallbackRouteImport } from './routes/sso-callback'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RemindersRouteImport } from './routes/reminders'
+import { Route as MaterialsRouteImport } from './routes/materials'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as FocusRouteImport } from './routes/focus'
 import { Route as DashboardRouteImport } from './routes/dashboard'
@@ -32,6 +33,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const RemindersRoute = RemindersRouteImport.update({
   id: '/reminders',
   path: '/reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MaterialsRoute = MaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -72,6 +78,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
   '/login': typeof LoginRoute
+  '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
   '/sso-callback': typeof SsoCallbackRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
   '/login': typeof LoginRoute
+  '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
   '/sso-callback': typeof SsoCallbackRoute
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
   '/login': typeof LoginRoute
+  '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
   '/sso-callback': typeof SsoCallbackRoute
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/focus'
     | '/login'
+    | '/materials'
     | '/reminders'
     | '/settings'
     | '/sso-callback'
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/focus'
     | '/login'
+    | '/materials'
     | '/reminders'
     | '/settings'
     | '/sso-callback'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/focus'
     | '/login'
+    | '/materials'
     | '/reminders'
     | '/settings'
     | '/sso-callback'
@@ -142,6 +154,7 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   FocusRoute: typeof FocusRoute
   LoginRoute: typeof LoginRoute
+  MaterialsRoute: typeof MaterialsRoute
   RemindersRoute: typeof RemindersRoute
   SettingsRoute: typeof SettingsRoute
   SsoCallbackRoute: typeof SsoCallbackRoute
@@ -168,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/reminders'
       fullPath: '/reminders'
       preLoaderRoute: typeof RemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/materials': {
+      id: '/materials'
+      path: '/materials'
+      fullPath: '/materials'
+      preLoaderRoute: typeof MaterialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -222,6 +242,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   FocusRoute: FocusRoute,
   LoginRoute: LoginRoute,
+  MaterialsRoute: MaterialsRoute,
   RemindersRoute: RemindersRoute,
   SettingsRoute: SettingsRoute,
   SsoCallbackRoute: SsoCallbackRoute,

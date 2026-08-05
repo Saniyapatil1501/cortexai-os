@@ -14,6 +14,7 @@ import {
   Command,
   Minus,
   Square,
+  BookOpen,
 } from "lucide-react";
 import { Command as Cmdk } from "cmdk";
 import { Logo } from "./Logo";
@@ -26,6 +27,7 @@ import { UserButton } from "@clerk/clerk-react";
 const nav = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/assistant", label: "AI Assistant", icon: Sparkles },
+  { to: "/materials", label: "Study Materials", icon: BookOpen },
   { to: "/focus", label: "Focus", icon: Timer },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/reminders", label: "Reminders", icon: Bell },
@@ -418,6 +420,13 @@ export function AppLayout({ children }: { children: ReactNode }) {
                   >
                     <BarChart3 className="h-4 w-4 text-muted-foreground" />
                     <span>Analytics Insights</span>
+                  </Cmdk.Item>
+                  <Cmdk.Item 
+                    onSelect={() => { navigate({ to: "/materials" }); setSearchOpen(false); }}
+                    className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
+                  >
+                    <BookOpen className="h-4 w-4 text-muted-foreground" />
+                    <span>Study Materials</span>
                   </Cmdk.Item>
                   <Cmdk.Item 
                     onSelect={() => { navigate({ to: "/reminders" }); setSearchOpen(false); }}

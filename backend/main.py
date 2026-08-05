@@ -22,7 +22,7 @@ import uvicorn
 
 
 # We will initialize routers in separate files
-from app.api import auth, sessions, activities, assistant, reminders
+from app.api import auth, sessions, activities, assistant, reminders, documents
 from app.database import create_db_and_tables
 
 app = FastAPI(
@@ -55,6 +55,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["Focus Session
 app.include_router(activities.router, prefix="/api/activities", tags=["Activity Monitor"])
 app.include_router(assistant.router, prefix="/api/assistant", tags=["AI Assistant"])
 app.include_router(reminders.router, prefix="/api/reminders", tags=["Reminders"])
+app.include_router(documents.router, prefix="/api/documents", tags=["Study Materials"])
 
 tracker = None
 

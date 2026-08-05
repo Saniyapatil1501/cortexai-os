@@ -4,9 +4,12 @@ let tokenGetter: (() => Promise<string | null>) | null = null;
 
 async function authedFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const headers = { 
-    "Content-Type": "application/json",
     ...options.headers 
   } as Record<string, string>;
+  
+  if (!(options.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
   
   if (tokenGetter) {
     try {
@@ -89,6 +92,30 @@ export interface UserSettingsData {
   name?: string;
   role?: string;
   timezone?: string;
+}
+
+export interface DocumentItem {
+  id: number;
+  user_id: number;
+  filename: string;
+  original_filename: string;
+  file_type: string;
+  file_path: string;
+  file_size: number;
+  status: string;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentChunkItem {
+  id: number;
+  document_id: number;
+  user_id: number;
+  chunk_index: number;
+  content: string;
+  token_count: number;
+  created_at: string;
 }
 
 export const cortexClient = {
@@ -238,6 +265,39 @@ export const cortexClient = {
     const res = await authedFetch(`${BASE_URL}/assistant/history/${userId}`, {
       method: "DELETE",
     });
+    return res.json();
+  },
+
+  async getDocuments(userId: number): Promise<DocumentItem[]> {
+    const res = await authedFetch(`${BASE_URL}/documents/${userId}`);
+    return res.json();
+  },
+
+  async uploadDocument(userId: number, file: File): Promise<DocumentItem> {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("user_id", String(userId));
+    const res = await authedFetch(`${BASE_URL}/documents/upload`, {
+      method: "POST",
+      body: formData,
+    });
+    return res.json();
+  },
+
+  async deleteDocument(documentId: number): Promise<{ status: string }> {
+    const res = await authedFetch(`${BASE_URL}/documents/${documentId}`, {
+      method: "DELETE",
+    });
+    return res.json();
+  },
+
+  async getDocumentChunks(documentId: number): Promise<DocumentChunkItem[]> {
+    const res = await authedFetch(`${BASE_URL}/documents/${documentId}/chunks`);
+    return res.json();
+  },
+  
+  async getDocumentStatus(documentId: number): Promise<{ id: number; status: string; chunk_count: number }> {
+    const res = await authedFetch(`${BASE_URL}/documents/${documentId}/status`);
     return res.json();
   }
 };
