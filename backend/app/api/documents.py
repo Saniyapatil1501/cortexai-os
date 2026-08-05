@@ -32,9 +32,11 @@ def sanitize_filename(filename: str) -> str:
 
 def process_document_background(doc_id: int, file_path: str, file_type: str, user_id: int):
     """
-    Background worker function to extract text, clean, chunk and save to DB.
+    Background worker function to extract text, clean, chunk, embed and index.
     """
     from app.nlp.document_processor import doc_processor
+    from app.nlp.embeddings import embedding_engine
+    from app.rag.vector_store import vector_store
     
     with Session(engine) as session:
         doc = session.get(Document, doc_id)
@@ -42,7 +44,7 @@ def process_document_background(doc_id: int, file_path: str, file_type: str, use
             return
         
         try:
-            # Process the file using the NLP pipeline
+            # 1. Process/Chunk raw text
             chunks = doc_processor.process_document(file_path, file_type)
             
             for c in chunks:
@@ -56,11 +58,27 @@ def process_document_background(doc_id: int, file_path: str, file_type: str, use
                 session.add(chunk)
             
             doc.chunk_count = len(chunks)
+            doc.status = "embedding"
+            doc.updated_at = datetime.utcnow()
+            session.add(doc)
+            session.commit()
+            
+            # 2. Query committed chunks to retrieve database primary key IDs for vector mappings
+            statement = select(DocumentChunk).where(DocumentChunk.document_id == doc_id).order_by(DocumentChunk.chunk_index.asc())
+            committed_chunks = session.exec(statement).all()
+            
+            # 3. Generate embeddings locally using the model
+            contents = [c.content for c in committed_chunks]
+            embeddings = embedding_engine.embed_texts(contents)
+            
+            # 4. Insert vectors and metadata to FAISS index
+            vector_store.add_chunks(committed_chunks, doc.original_filename, embeddings)
+            
             doc.status = "ready"
             doc.updated_at = datetime.utcnow()
             session.add(doc)
             session.commit()
-            print(f"[DocProcessor] Document {doc_id} processed successfully. Created {len(chunks)} chunks.")
+            print(f"[DocProcessor] Document {doc_id} processed & embedded successfully. Chunks: {len(chunks)}")
             
         except Exception as e:
             session.rollback()
@@ -209,6 +227,13 @@ def delete_document(
     # Enforce document owner verification
     verify_user_access(doc.user_id, authorization, session)
     
+    # Delete corresponding vectors from FAISS to prevent orphans
+    from app.rag.vector_store import vector_store
+    try:
+        vector_store.delete_document_vectors(document_id)
+    except Exception as e:
+        print(f"[DocAPI] Warning: Failed to delete vectors from store: {str(e)}")
+        
     # Delete chunks first
     chunks_statement = select(DocumentChunk).where(DocumentChunk.document_id == document_id)
     chunks = session.exec(chunks_statement).all()
@@ -228,3 +253,18 @@ def delete_document(
     session.commit()
     
     return {"status": "success", "message": "Document deleted successfully"}
+
+@router.post("/reindex")
+def trigger_reindex(
+    session: Session = Depends(get_session),
+    authorization: Optional[str] = Header(None)
+):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header is required")
+        
+    from app.rag.vector_store import vector_store
+    try:
+        vector_store.rebuild_index(session)
+        return {"status": "success", "message": "Vector store reindexed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reindexing failed: {str(e)}")

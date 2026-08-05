@@ -118,6 +118,20 @@ export interface DocumentChunkItem {
   created_at: string;
 }
 
+export interface SearchResultItem {
+  document_id: number;
+  filename: string;
+  chunk_index: number;
+  content: string;
+  similarity_score: number;
+}
+
+export interface SearchResponse {
+  query: string;
+  results: SearchResultItem[];
+  context: string;
+}
+
 export const cortexClient = {
   setTokenGetter(getter: () => Promise<string | null>) {
     tokenGetter = getter;
@@ -298,6 +312,26 @@ export const cortexClient = {
   
   async getDocumentStatus(documentId: number): Promise<{ id: number; status: string; chunk_count: number }> {
     const res = await authedFetch(`${BASE_URL}/documents/${documentId}/status`);
+    return res.json();
+  },
+
+  async semanticSearch(userId: number, query: string, documentId?: number, topK: number = 5): Promise<SearchResponse> {
+    const res = await authedFetch(`${BASE_URL}/rag/search`, {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: userId,
+        query,
+        document_id: documentId || null,
+        top_k: topK
+      })
+    });
+    return res.json();
+  },
+
+  async reindex(): Promise<{ status: string; message: string }> {
+    const res = await authedFetch(`${BASE_URL}/documents/reindex`, {
+      method: "POST"
+    });
     return res.json();
   }
 };

@@ -13,10 +13,11 @@ import {
   Loader2, 
   CheckCircle2, 
   X,
-  FileUp
+  FileUp,
+  Search
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
-import { cortexClient, DocumentItem, DocumentChunkItem } from "@/lib/api";
+import { cortexClient, DocumentItem, DocumentChunkItem, SearchResultItem } from "@/lib/api";
 import { useCortexAuth } from "@/hooks/useCortexAuth";
 import { toast } from "sonner";
 
@@ -55,11 +56,21 @@ function StudyMaterialsPage() {
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Semantic Search State
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchDocId, setSearchDocId] = useState("all");
+  const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+
   // Chunk Viewer State
   const [selectedDoc, setSelectedDoc] = useState<DocumentItem | null>(null);
   const [chunks, setChunks] = useState<DocumentChunkItem[]>([]);
   const [chunksLoading, setChunksLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  const [highlightedChunkIndex, setHighlightedChunkIndex] = useState<number | null>(null);
+  
+  const highlightedRef = useRef<HTMLDivElement>(null);
 
   const fetchDocuments = () => {
     if (!userId) return;
@@ -82,17 +93,16 @@ function StudyMaterialsPage() {
     fetchDocuments();
   }, [userId, isBackendOffline]);
 
-  // Polling for processing documents
+  // Polling for processing or embedding documents
   useEffect(() => {
     if (!userId || isBackendOffline) return;
 
-    const needsPolling = documents.some(d => d.status === "processing");
+    const needsPolling = documents.some(d => d.status === "processing" || d.status === "embedding");
     if (!needsPolling) return;
 
     const interval = setInterval(async () => {
       try {
         const data = await cortexClient.getDocuments(userId);
-        // Compare status to see if changes occurred to prevent unnecessary state triggers
         const hasStatusChange = data.some((newDoc) => {
           const oldDoc = documents.find(d => d.id === newDoc.id);
           return oldDoc && oldDoc.status !== newDoc.status;
@@ -108,6 +118,16 @@ function StudyMaterialsPage() {
 
     return () => clearInterval(interval);
   }, [userId, documents, isBackendOffline]);
+
+  // Smooth scroll to highlighted chunk inside modal
+  useEffect(() => {
+    if (modalOpen && highlightedChunkIndex !== null && !chunksLoading) {
+      const timer = setTimeout(() => {
+        highlightedRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [modalOpen, highlightedChunkIndex, chunksLoading]);
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
@@ -159,7 +179,7 @@ function StudyMaterialsPage() {
     try {
       const newDoc = await cortexClient.uploadDocument(userId, file);
       toast.dismiss(toastId);
-      toast.success(`"${filename}" uploaded successfully. Processing text...`);
+      toast.success(`"${filename}" uploaded successfully. Parsing and embedding text...`);
       setDocuments(prev => [newDoc, ...prev]);
     } catch (err: any) {
       toast.dismiss(toastId);
@@ -179,8 +199,9 @@ function StudyMaterialsPage() {
 
     try {
       await cortexClient.deleteDocument(docId);
-      toast.success("Document deleted");
+      toast.success("Document and its vectors deleted");
       setDocuments(prev => prev.filter(d => d.id !== docId));
+      setSearchResults(prev => prev.filter(r => r.document_id !== docId));
       if (selectedDoc?.id === docId) {
         setModalOpen(false);
         setSelectedDoc(null);
@@ -191,9 +212,10 @@ function StudyMaterialsPage() {
     }
   };
 
-  const handleViewChunks = async (doc: DocumentItem) => {
+  const handleViewChunks = async (doc: DocumentItem, highlightIdx: number | null = null) => {
     setSelectedDoc(doc);
     setChunksLoading(true);
+    setHighlightedChunkIndex(highlightIdx);
     setModalOpen(true);
     try {
       const chunkData = await cortexClient.getDocumentChunks(doc.id);
@@ -204,6 +226,42 @@ function StudyMaterialsPage() {
       setModalOpen(false);
     } finally {
       setChunksLoading(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!userId || !searchQuery.trim()) return;
+
+    setSearching(true);
+    const targetDocId = searchDocId === "all" ? undefined : Number(searchDocId);
+    
+    try {
+      const response = await cortexClient.semanticSearch(userId, searchQuery, targetDocId, 5);
+      setSearchResults(response.results);
+    } catch (err) {
+      console.error("Semantic search failed:", err);
+      toast.error("Semantic search query failed.");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleReindex = async () => {
+    const confirmReindex = window.confirm("Are you sure you want to rebuild the entire vector index from current database chunks?");
+    if (!confirmReindex) return;
+
+    setReindexing(true);
+    const toastId = toast.loading("Rebuilding vector store indices...");
+    try {
+      await cortexClient.reindex();
+      toast.dismiss(toastId);
+      toast.success("Index rebuild completed successfully.");
+    } catch (err) {
+      toast.dismiss(toastId);
+      console.error("Reindexing failed:", err);
+      toast.error("Rebuilding vector indexes failed.");
+    } finally {
+      setReindexing(false);
     }
   };
 
@@ -228,42 +286,193 @@ function StudyMaterialsPage() {
         description="Upload course notes, textbook PDFs, or text documents to train Cortex as your personalized tutor."
       />
 
-      <div className="grid grid-cols-1 gap-6">
-        {/* Upload Zone */}
-        <Card padded={false} className="border border-dashed border-border/80 hover:border-foreground/30 transition overflow-hidden">
-          <div
-            onDragEnter={handleDrag}
-            onDragOver={handleDrag}
-            onDragLeave={handleDrag}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`flex flex-col items-center justify-center py-10 px-4 text-center cursor-pointer transition select-none ${
-              dragActive ? "bg-surface-2/80" : "bg-surface-1/40 hover:bg-surface-2/30"
-            }`}
-          >
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileInput}
-              accept=".pdf,.txt,.md"
-              className="hidden"
-              disabled={uploading}
-            />
-            {uploading ? (
-              <Loader2 className="h-10 w-10 text-muted-foreground animate-spin mb-3" />
-            ) : (
-              <FileUp className="h-10 w-10 text-muted-foreground/80 mb-3" />
-            )}
-            <div className="text-sm font-medium">
-              {uploading ? "Uploading document..." : "Drag & drop study material here or click to browse"}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Upload Zone & Diagnostics Column */}
+        <div className="lg:col-span-1 space-y-6">
+          <Card padded={false} className="border border-dashed border-border/80 hover:border-foreground/30 transition overflow-hidden">
+            <div
+              onDragEnter={handleDrag}
+              onDragOver={handleDrag}
+              onDragLeave={handleDrag}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`flex flex-col items-center justify-center py-10 px-4 text-center cursor-pointer transition select-none ${
+                dragActive ? "bg-surface-2/80" : "bg-surface-1/40 hover:bg-surface-2/30"
+              }`}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileInput}
+                accept=".pdf,.txt,.md"
+                className="hidden"
+                disabled={uploading}
+              />
+              {uploading ? (
+                <Loader2 className="h-10 w-10 text-muted-foreground animate-spin mb-3" />
+              ) : (
+                <FileUp className="h-10 w-10 text-muted-foreground/80 mb-3" />
+              )}
+              <div className="text-sm font-medium">
+                {uploading ? "Uploading document..." : "Drag & drop study material here or click to browse"}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1.5">
+                Supports PDF, TXT, MD up to 10MB
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground mt-1.5">
-              Supports PDF, TXT, MD up to 10MB
-            </div>
-          </div>
-        </Card>
+          </Card>
 
-        {/* Documents List */}
+          {/* RAG Information & Diagnostics */}
+          <Card>
+            <h3 className="text-sm font-semibold text-foreground">NLP System Diagnostics</h3>
+            <div className="mt-4 space-y-3 text-xs">
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Embedding Model:</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">all-MiniLM-L6-v2</span>
+              </div>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Dimension:</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">384</span>
+              </div>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Vector DB Store:</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">FAISS (L2 Flat)</span>
+              </div>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Ready Files:</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">
+                  {documents.filter((d) => d.status === "ready").length}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-muted-foreground">
+                <span>Total Vectors:</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">
+                  {documents.reduce((acc, d) => acc + (d.status === "ready" ? d.chunk_count : 0), 0)}
+                </span>
+              </div>
+              <div className="pt-2 border-t border-border/40">
+                <Button 
+                  onClick={handleReindex} 
+                  disabled={reindexing || documents.length === 0} 
+                  className="w-full text-xs py-1.5 justify-center hover:opacity-90 transition"
+                >
+                  {reindexing ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin mr-1.5" /> Reindexing...
+                    </>
+                  ) : (
+                    "Rebuild Vector Index"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Semantic Search Dashboard Area */}
+        <div className="lg:col-span-2">
+          <Card className="h-full flex flex-col justify-between">
+            <div>
+              <h3 className="text-base font-medium">Search Your Study Materials</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Query your local database semantically. Matches are retrieved from your uploaded files.</p>
+            </div>
+            
+            <div className="mt-4 flex flex-col sm:flex-row gap-2 shrink-0">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Ask a question (e.g., 'What is deadlock?')"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                  className="w-full rounded-md border border-border bg-surface-2/60 pl-3 pr-10 py-2 text-sm text-foreground outline-none transition focus:border-foreground/30 focus:bg-surface-2"
+                />
+                <button
+                  onClick={handleSearch}
+                  disabled={searching || !searchQuery.trim()}
+                  className="absolute right-3 top-2.5 p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition cursor-pointer"
+                >
+                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </button>
+              </div>
+
+              <select
+                value={searchDocId}
+                onChange={(e) => setSearchDocId(e.target.value)}
+                className="rounded-md border border-border bg-surface-2 px-3 py-2 text-xs text-foreground outline-none cursor-pointer transition focus:border-foreground/30"
+              >
+                <option value="all">All Documents</option>
+                {documents
+                  .filter((d) => d.status === "ready")
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.original_filename}
+                    </option>
+                  ))}
+              </select>
+              
+              <Button
+                onClick={handleSearch}
+                disabled={searching || !searchQuery.trim() || documents.filter((d) => d.status === "ready").length === 0}
+                className="text-xs shrink-0 py-2 sm:px-4 justify-center hover:opacity-90 transition"
+              >
+                Semantic Search
+              </Button>
+            </div>
+
+            {/* Search Results list container */}
+            <div className="mt-4 flex-1 overflow-y-auto max-h-[350px] min-h-[180px] pr-1.5 space-y-3">
+              {searching ? (
+                <div className="flex h-32 flex-col items-center justify-center text-sm text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin mb-2" /> Searching database...
+                </div>
+              ) : searchResults.length === 0 ? (
+                <div className="flex h-32 flex-col items-center justify-center text-xs text-muted-foreground border border-border/30 rounded-lg bg-surface-1/10 p-6 text-center">
+                  {documents.filter((d) => d.status === "ready").length === 0 
+                    ? "Upload study documents first to make them searchable."
+                    : "No search results. Enter a query above to retrieve matching content."}
+                </div>
+              ) : (
+                searchResults.map((res, idx) => (
+                  <div key={idx} className="rounded-lg border border-border bg-surface-1/30 p-4 transition hover:border-foreground/20">
+                    <div className="flex items-center justify-between text-xs mb-2">
+                      <div className="flex items-center gap-1.5 font-medium truncate max-w-xs sm:max-w-md">
+                        <BookOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="truncate" title={res.filename}>{res.filename}</span>
+                        <span className="text-[10px] text-muted-foreground bg-surface-2 px-1.5 py-0.5 rounded border border-border/50 shrink-0">
+                          Chunk #{res.chunk_index + 1}
+                        </span>
+                      </div>
+                      <span className="font-semibold text-emerald-400 shrink-0 ml-2">
+                        Relevance: {Math.round(res.similarity_score * 100)}%
+                      </span>
+                    </div>
+                    <p className="text-sm leading-relaxed text-foreground/80 line-clamp-3 select-text font-sans">
+                      {res.content}
+                    </p>
+                    <div className="mt-3 text-right">
+                      <button
+                        onClick={() => {
+                          const doc = documents.find((d) => d.id === res.document_id);
+                          if (doc) {
+                            handleViewChunks(doc, res.chunk_index);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground cursor-pointer transition font-medium"
+                      >
+                        <Eye className="h-3.5 w-3.5" /> View Source Chunk
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      {/* Documents List */}
+      <div className="mt-6">
         <Card>
           <div className="mb-4">
             <h3 className="text-base font-medium">Your Knowledge Base</h3>
@@ -323,8 +532,13 @@ function StudyMaterialsPage() {
                               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Processing
                             </span>
                           )}
+                          {doc.status === "embedding" && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-400">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Embedding
+                            </span>
+                          )}
                           {doc.status === "failed" && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-400" title="Scanned PDFs require Computer Vision OCR support.">
+                            <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-400" title="Processing error occurred. Scanned files require OCR.">
                               <AlertCircle className="h-3.5 w-3.5" /> Failed
                             </span>
                           )}
@@ -362,7 +576,7 @@ function StudyMaterialsPage() {
       {/* Chunk Viewer Modal */}
       {modalOpen && selectedDoc && (
         <div 
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
           onClick={() => setModalOpen(false)}
         >
           <div 
@@ -398,19 +612,34 @@ function StudyMaterialsPage() {
                   No chunks generated. The document may be empty or failed to parse.
                 </div>
               ) : (
-                chunks.map((chunk, idx) => (
-                  <div key={chunk.id} className="rounded-lg border border-border bg-surface-1/30 overflow-hidden">
-                    <div className="flex items-center justify-between border-b border-border/50 bg-surface-2/20 px-4 py-2 text-xs">
-                      <span className="font-semibold text-muted-foreground">Chunk #{idx + 1}</span>
-                      <span className="font-mono text-[10px] bg-surface-2 px-1.5 py-0.5 rounded text-muted-foreground">
-                        {chunk.token_count} Tokens (approx)
-                      </span>
+                chunks.map((chunk, idx) => {
+                  const isHighlighted = chunk.chunk_index === highlightedChunkIndex;
+                  return (
+                    <div 
+                      key={chunk.id} 
+                      ref={isHighlighted ? highlightedRef : null}
+                      className={`rounded-lg border transition-all duration-300 overflow-hidden ${
+                        isHighlighted 
+                          ? "border-amber-500 bg-amber-500/5 shadow-lg shadow-amber-500/5 scale-[1.01] ring-1 ring-amber-500/30" 
+                          : "border-border bg-surface-1/30"
+                      }`}
+                    >
+                      <div className={`flex items-center justify-between border-b px-4 py-2 text-xs transition-colors ${
+                        isHighlighted ? "border-amber-500/30 bg-amber-500/10" : "border-border/50 bg-surface-2/20"
+                      }`}>
+                        <span className={`font-semibold ${isHighlighted ? "text-amber-400" : "text-muted-foreground"}`}>
+                          Chunk #{idx + 1} {isHighlighted && "(Matched Source)"}
+                        </span>
+                        <span className="font-mono text-[10px] bg-surface-2 px-1.5 py-0.5 rounded text-muted-foreground">
+                          {chunk.token_count} Tokens (approx)
+                        </span>
+                      </div>
+                      <div className="p-4 text-sm leading-relaxed whitespace-pre-wrap select-text font-sans text-foreground/90">
+                        {chunk.content}
+                      </div>
                     </div>
-                    <div className="p-4 text-sm leading-relaxed whitespace-pre-wrap select-text font-sans text-foreground/90">
-                      {chunk.content}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
