@@ -133,14 +133,6 @@ export const cortexClient = {
     return res.json();
   },
 
-  async login(email: string): Promise<{ user_id: number; email: string }> {
-    const res = await authedFetch(`${BASE_URL}/auth/login`, {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
-    return res.json();
-  },
-
   async startFocusSession(userId: number, intention: string, targetDurationSeconds?: number): Promise<FocusSession> {
     const res = await authedFetch(`${BASE_URL}/sessions/start`, {
       method: "POST",

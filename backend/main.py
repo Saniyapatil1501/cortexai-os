@@ -63,7 +63,6 @@ def on_startup():
     global tracker
     from app.services.tracker import ActivityTracker
     from app.database import engine
-    import google.generativeai as genai
 
     create_db_and_tables()
     
@@ -71,19 +70,6 @@ def on_startup():
     tracker = ActivityTracker(engine=engine, user_id=None)
     tracker.start()
     print("CortexAI DB initialized and ActivityTracker daemon started (waiting for user session sync).")
-
-    # Console logging for Gemini configuration
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if gemini_key:
-        print("Gemini key detected: YES")
-        try:
-            genai.configure(api_key=gemini_key)
-            print("Gemini client initialized: YES")
-        except Exception as e:
-            print(f"Gemini client initialized: NO (Error: {str(e)})")
-    else:
-        print("Gemini key detected: NO")
-        print("Gemini client initialized: NO")
 
 @app.get("/")
 def read_root():

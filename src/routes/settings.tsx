@@ -21,7 +21,7 @@ const tabs = ["Account", "Appearance", "AI", "Voice", "Notifications", "Goals"] 
 function SettingsPage() {
   const [tab, setTab] = useState<(typeof tabs)[number]>("Account");
 
-  const { user } = useCortexAuth();
+  const { user, isBackendOffline } = useCortexAuth();
   const userId = user?.user_id;
 
   // Settings State
@@ -98,6 +98,20 @@ function SettingsPage() {
       toast.error("Failed to save profile");
     }
   };
+
+  if (isBackendOffline) {
+    return (
+      <AppLayout>
+        <PageHeader title="Settings" description="Configure your CortexAI workspace." />
+        <div className="flex h-[50vh] flex-col items-center justify-center gap-4 text-center">
+          <div className="text-lg font-medium text-destructive">Daemon Offline</div>
+          <div className="max-w-md text-sm text-muted-foreground">
+            The CortexAI Desktop Daemon is currently offline. Please ensure the backend is running and try again.
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (loading) {
     return (

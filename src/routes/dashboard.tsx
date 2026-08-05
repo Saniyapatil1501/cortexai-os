@@ -39,9 +39,23 @@ const suggestions = [
 
 function Dashboard() {
   const navigate = useNavigate();
-  const { user } = useCortexAuth();
+  const { user, isBackendOffline } = useCortexAuth();
   const userId = user?.user_id;
   const displayName = user?.first_name || "";
+
+  if (isBackendOffline) {
+    return (
+      <AppLayout>
+        <PageHeader title="Dashboard" description="Your CortexAI productivity command center." />
+        <div className="flex h-[50vh] flex-col items-center justify-center gap-4 text-center">
+          <div className="text-lg font-medium text-destructive">Daemon Offline</div>
+          <div className="max-w-md text-sm text-muted-foreground">
+            The CortexAI Desktop Daemon is currently offline. Please ensure the backend is running and try again.
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   if (!userId) {
     return (
