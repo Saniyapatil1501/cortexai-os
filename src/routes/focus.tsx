@@ -183,6 +183,17 @@ function FocusPage() {
     return () => clearInterval(t);
   }, [running, activeSession, userId, total]);
 
+  // Local 1-second clock to make the timer tick down smoothly in the UI
+  useEffect(() => {
+    if (!running || activeState !== "STUDY") return;
+
+    const interval = setInterval(() => {
+      setElapsed((prev) => prev + 1);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [running, activeState]);
+
   const handleStart = () => {
     if (!userId) return;
     cortexClient.startFocusSession(userId, intention, 50 * 60).then((sess) => {

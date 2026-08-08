@@ -175,15 +175,63 @@ def chat_stream(request: ChatRequest, session: Session = Depends(get_session), a
     
     history_list = [{"role": msg.role, "content": msg.content} for msg in history_msgs if msg.id != user_msg.id]
     
-    # Determine RAG necessity
-    rag_modes = ["notes", "quiz", "flashcards", "viva"]
-    context = ""
-    references = []
-    
     # Check if local Ollama model is running and reachable
     if not ai_engine.health_check():
         return StreamingResponse(
             (f"data: {json.dumps({'error': 'OLLAMA_OFFLINE'})}\n\n" for _ in range(1)),
+            media_type="text/event-stream"
+        )
+        
+    # Intercept "Summarize my last study session" triggers
+    message_clean = request.message.lower().strip().rstrip(".?!")
+    if message_clean == "summarize my last study session":
+        # Retrieve latest completed focus session
+        last_sess_stmt = select(FocusSession).where(
+            FocusSession.user_id == request.user_id, 
+            FocusSession.completed == True
+        ).order_by(FocusSession.ended_at.desc())
+        last_sess = session.exec(last_sess_stmt).first()
+        
+        if not last_sess:
+            async def no_session_gen():
+                no_session_text = "No completed study session is available yet."
+                yield "data: " + json.dumps({"token": no_session_text}) + "\n\n"
+                await save_assistant_message(request.user_id, no_session_text)
+            return StreamingResponse(no_session_gen(), media_type="text/event-stream")
+            
+        # Get timeline events for this session
+        evts_stmt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == last_sess.id).order_by(FocusSessionEvent.start_time.asc())
+        events = session.exec(evts_stmt).all()
+        
+        # Calculate session analytics
+        study_seconds = sum(e.duration for e in events if e.state == "STUDY")
+        distr_seconds = sum(e.duration for e in events if e.state == "DISTRACTION")
+        idle_seconds = sum(e.duration for e in events if e.state == "IDLE")
+        
+        timeline_summary = []
+        for e in events:
+            timeline_summary.append(f"- {e.state} on App '{e.app_name}' (Window: '{e.window_title}') for {e.duration}s")
+            
+        # Build RAG-style study session grounding context
+        session_context = (
+            f"=== COMPLETED STUDY SESSION ===\n"
+            f"Intention: {last_sess.intention}\n"
+            f"Started At: {last_sess.started_at.strftime('%Y-%m-%d %H:%M:%S') if last_sess.started_at else 'Unknown'}\n"
+            f"Ended At: {last_sess.ended_at.strftime('%Y-%m-%d %H:%M:%S') if last_sess.ended_at else 'Unknown'}\n"
+            f"Verified Focus Duration: {study_seconds // 60}m {study_seconds % 60}s\n"
+            f"Distraction Duration: {distr_seconds // 60}m {distr_seconds % 60}s\n"
+            f"Idle Duration: {idle_seconds // 60}m {idle_seconds % 60}s\n\n"
+            f"Timeline Events:\n" + "\n".join(timeline_summary) + "\n"
+            f"================================="
+        )
+        
+        prompt = (
+            "Summarize the study session metrics, highlight when the user was focused versus distracted, "
+            "and provide 2 productivity coaching tips based on this session."
+        )
+        
+        return StreamingResponse(
+            ai_streaming_generator(request.user_id, prompt, session_context, [], "summarize", []),
             media_type="text/event-stream"
         )
         
@@ -193,7 +241,11 @@ def chat_stream(request: ChatRequest, session: Session = Depends(get_session), a
             summarize_document(request.document_id, request.user_id, session),
             media_type="text/event-stream"
         )
-        
+    # Determine RAG necessity
+    rag_modes = ["notes", "quiz", "flashcards", "viva"]
+    context = ""
+    references = []
+    
     if request.mode in rag_modes:
         # Search index
         retrieved = retriever.retrieve(

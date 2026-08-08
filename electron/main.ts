@@ -9,7 +9,7 @@ import {
   Notification,
 } from "electron";
 import * as path from "path";
-import { exec, ChildProcess } from "child_process";
+import { exec, spawn, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import * as fs from "fs";
 
@@ -35,29 +35,36 @@ function startBackend() {
     const venvPythonUnix = path.join(__dirname, "../backend/venv/bin/python");
 
     if (fs.existsSync(venvPythonWindows)) {
-      pythonCmd = `"${venvPythonWindows}"`;
+      pythonCmd = venvPythonWindows;
     } else if (fs.existsSync(venvPythonUnix)) {
-      pythonCmd = `"${venvPythonUnix}"`;
+      pythonCmd = venvPythonUnix;
     }
 
     console.log(`Using Python command: ${pythonCmd}`);
     console.log(`Using Backend working directory: ${backendDir}`);
 
     // Spawns the local FastAPI python script with backend folder as working directory
-    backendProcess = exec(
-      `${pythonCmd} "${scriptPath}"`,
-      { cwd: backendDir },
-      (error, stdout, stderr) => {
-        if (error) {
-          console.error(`FastAPI daemon error: ${error.message}`);
-          return;
-        }
-        if (stderr) {
-          console.error(`FastAPI stderr: ${stderr}`);
-        }
-        console.log(`FastAPI stdout: ${stdout}`);
-      },
-    );
+    // Using "-u" parameter ensures unbuffered real-time stdout/stderr prints
+    backendProcess = spawn(pythonCmd, ["-u", scriptPath], {
+      cwd: backendDir,
+      shell: true,
+    });
+
+    backendProcess.stdout?.on("data", (data) => {
+      console.log(`[FastAPI] ${data.toString().trim()}`);
+    });
+
+    backendProcess.stderr?.on("data", (data) => {
+      console.error(`[FastAPI Stderr] ${data.toString().trim()}`);
+    });
+
+    backendProcess.on("error", (err) => {
+      console.error(`Failed to start FastAPI daemon: ${err.message}`);
+    });
+
+    backendProcess.on("close", (code) => {
+      console.log(`FastAPI daemon exited with code ${code}`);
+    });
   }
 }
 

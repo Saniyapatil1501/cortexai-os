@@ -193,6 +193,7 @@ def get_active_session(user_id: int, session: Session = Depends(get_session), _ 
     
     res = active_sess.dict()
     res.update(analytics)
+    res["duration_seconds"] = analytics["verified_focus_seconds"]
     return res
 
 @router.get("/timeline/{session_id}")

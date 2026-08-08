@@ -62,13 +62,35 @@ class StudyTimerStateMachine:
         # Handle state transitions
         if current_state == "STUDY":
             if category == "study":
-                # Continuous study: update end_time and add duration
-                last_event.end_time = now
-                last_event.duration = int((now - last_event.start_time).total_seconds())
+                # Check if the active window app name or window title has changed
+                if last_event.app_name != app_name or last_event.window_title != window_title:
+                    # Close previous study segment
+                    last_event.end_time = now
+                    last_event.duration = int((now - last_event.start_time).total_seconds())
+                    session.add(last_event)
+                    
+                    # Open fresh study segment with correct window details
+                    new_study = FocusSessionEvent(
+                        session_id=focus_session.id,
+                        state="STUDY",
+                        start_time=now,
+                        end_time=now,
+                        duration=0,
+                        app_name=app_name,
+                        window_title=window_title,
+                        classification=category,
+                        confidence=confidence,
+                        classification_reason=reason
+                    )
+                    session.add(new_study)
+                else:
+                    # Continuous study on same context: update end_time and add duration
+                    last_event.end_time = now
+                    last_event.duration = int((now - last_event.start_time).total_seconds())
+                    session.add(last_event)
                 
                 # Accumulate verified focus time on the session
                 focus_session.duration_seconds += 1
-                session.add(last_event)
                 session.add(focus_session)
                 session.commit()
             else:

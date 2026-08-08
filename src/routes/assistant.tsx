@@ -40,6 +40,49 @@ const prompts = [
   "Draft a stand-up update",
 ];
 
+function tryParseAIStructuredData(text: string) {
+  let cleaned = text.trim();
+
+  if (cleaned.includes("```")) {
+    const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
+    if (match && match[1]) {
+      cleaned = match[1].trim();
+    }
+  }
+
+  if (!cleaned.startsWith("[") && !cleaned.startsWith("{")) {
+    const firstBrace = cleaned.indexOf("{");
+    const firstBracket = cleaned.indexOf("[");
+
+    if (firstBracket !== -1 && (firstBrace === -1 || firstBracket < firstBrace)) {
+      const lastBracket = cleaned.lastIndexOf("]");
+      if (lastBracket !== -1 && lastBracket > firstBracket) {
+        cleaned = cleaned.substring(firstBracket, lastBracket + 1).trim();
+      }
+    } else if (firstBrace !== -1) {
+      const lastBrace = cleaned.lastIndexOf("}");
+      if (lastBrace !== -1 && lastBrace > firstBrace) {
+        cleaned = cleaned.substring(firstBrace, lastBrace + 1).trim();
+      }
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      if (Array.isArray(parsed.questions)) return { type: "quiz", data: parsed.questions };
+      if (Array.isArray(parsed.flashcards)) return { type: "flashcards", data: parsed.flashcards };
+      if (parsed.question && parsed.options) return { type: "quiz", data: [parsed] };
+      if (parsed.front && parsed.back) return { type: "flashcards", data: [parsed] };
+    }
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      if (parsed[0].question && parsed[0].options) return { type: "quiz", data: parsed };
+      if (parsed[0].front && parsed[0].back) return { type: "flashcards", data: parsed };
+    }
+  } catch (e) {}
+  return null;
+}
+
 function AssistantPage() {
   const { user } = useCortexAuth();
   const userId = user?.user_id;
@@ -518,19 +561,15 @@ function AssistantPage() {
                       if (m.role === "ai" && m.text === "OLLAMA_OFFLINE") {
                         return <OllamaSetupWizard onRetry={() => setIsOllamaOffline(false)} />;
                       }
-                      if (m.role === "ai" && m.text.startsWith("[")) {
-                        try {
-                          const parsed = JSON.parse(m.text);
-                          if (Array.isArray(parsed) && parsed.length > 0) {
-                            if (parsed[0].question && parsed[0].options) {
-                              return <InteractiveQuiz data={parsed} />;
-                            }
-                            if (parsed[0].front && parsed[0].back) {
-                              return <FlashcardList data={parsed} />;
-                            }
+                      if (m.role === "ai") {
+                        const parsedData = tryParseAIStructuredData(m.text);
+                        if (parsedData) {
+                          if (parsedData.type === "quiz") {
+                            return <InteractiveQuiz data={parsedData.data} />;
                           }
-                        } catch (e) {
-                          // fallback to text rendering
+                          if (parsedData.type === "flashcards") {
+                            return <FlashcardList data={parsedData.data} />;
+                          }
                         }
                       }
                       return <p className="whitespace-pre-wrap select-text font-sans">{m.text}</p>;

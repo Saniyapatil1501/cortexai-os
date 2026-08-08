@@ -89,6 +89,18 @@ def verify_and_decode_clerk_token(token: str):
         print(f"[CortexAuth] JWT Verification failed: {str(e)}", flush=True)
         raise HTTPException(status_code=401, detail=f"Invalid authentication signature: {str(e)}")
 
+def sync_tracker_user(user_id: int):
+    import sys
+    for mod in list(sys.modules.values()):
+        if mod and hasattr(mod, "tracker") and getattr(mod, "tracker") is not None:
+            try:
+                tracker_obj = getattr(mod, "tracker")
+                if tracker_obj.user_id != user_id:
+                    tracker_obj.user_id = user_id
+                    print(f"[CortexAuth] Dynamic Sync: Updated ActivityTracker user_id to {user_id} (found in module {mod.__name__})", flush=True)
+            except Exception:
+                pass
+
 def verify_user_access(
     user_id: int, 
     authorization: Optional[str] = Header(None), 
@@ -107,6 +119,10 @@ def verify_user_access(
     user = session.exec(statement).first()
     if not user or user.id != user_id:
         raise HTTPException(status_code=403, detail="Access denied to requested user data")
+        
+    # Synchronize tracker user_id proactively
+    sync_tracker_user(user_id)
+
 
 
 class UserSync(BaseModel):
@@ -216,14 +232,8 @@ def sync_user(
         session.add(r2)
         session.commit()
         
-    # Update active tracker user_id if running (check both main and __main__ namespaces)
-    import sys
-    for mod_name in ["main", "__main__"]:
-        main_module = sys.modules.get(mod_name)
-        if main_module and hasattr(main_module, "tracker") and main_module.tracker:
-            main_module.tracker.user_id = user.id
-            print(f"ActivityTracker dynamically updated to log for User ID: {user.id} (found in module {mod_name})", flush=True)
-            break
+    # Synchronize tracker user_id proactively
+    sync_tracker_user(user.id)
         
     return {
         "status": "success",
