@@ -15,7 +15,16 @@ export function Logo({ size = 28, className = "", showWord = false }: LogoProps)
         xmlns="http://www.w3.org/2000/svg"
         aria-label="CortexAI"
       >
-        <rect x="1" y="1" width="30" height="30" rx="8" stroke="currentColor" strokeOpacity="0.35" strokeWidth="1" />
+        <rect
+          x="1"
+          y="1"
+          width="30"
+          height="30"
+          rx="8"
+          stroke="currentColor"
+          strokeOpacity="0.35"
+          strokeWidth="1"
+        />
         <path
           d="M10 11.5C10 10.6716 10.6716 10 11.5 10H20.5C21.3284 10 22 10.6716 22 11.5V20.5C22 21.3284 21.3284 22 20.5 22H11.5C10.6716 22 10 21.3284 10 20.5V11.5Z"
           stroke="currentColor"

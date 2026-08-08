@@ -90,5 +90,32 @@ class DocumentChunk(SQLModel, table=True):
     chunk_index: int
     content: str
     token_count: int
+    page_number: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class FocusSessionEvent(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="focussession.id", index=True)
+    state: str  # 'STUDY', 'DISTRACTION', 'IDLE', 'PENDING', 'TARGET_COMPLETED', 'SESSION_CANCELLED', 'SESSION_ENDED'
+    start_time: datetime
+    end_time: datetime
+    duration: int
+    app_name: Optional[str] = None
+    window_title: Optional[str] = None
+    classification: Optional[str] = None
+    confidence: Optional[float] = None
+    classification_reason: Optional[str] = None
+
+
+class UserFeedbackCorrection(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    app_name: str
+    window_title: str
+    study_goal: str
+    predicted_label: str
+    corrected_label: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
 

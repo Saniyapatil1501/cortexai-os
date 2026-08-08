@@ -54,3 +54,14 @@ Thumbs.db
 
 # IDE & Generation Artifacts
 .lovable/
+
+# Generated Runtime Files & Local Vector Indexes
+evaluation_results/
+backend/evaluation_results/
+data/vector_store/
+backend/data/vector_store/
+backend/scratch/
+*.log
+temp_*.png
+screenshot_*.png
+

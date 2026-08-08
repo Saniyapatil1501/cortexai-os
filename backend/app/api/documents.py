@@ -53,7 +53,8 @@ def process_document_background(doc_id: int, file_path: str, file_type: str, use
                     user_id=user_id,
                     chunk_index=c["chunk_index"],
                     content=c["content"],
-                    token_count=c["token_count"]
+                    token_count=c["token_count"],
+                    page_number=c.get("page_number")
                 )
                 session.add(chunk)
             

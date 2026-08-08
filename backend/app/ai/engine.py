@@ -1,30 +1,38 @@
-import asyncio
-from typing import AsyncGenerator, List
+from typing import AsyncGenerator, List, Dict
+from app.ai.factory import ai_factory
+from app.ai.prompts import AIPrompts
 
 class AIEngine:
     def __init__(self):
         pass
 
-    async def generate(self, prompt: str, context: str, history: List[dict]) -> str:
-        """
-        Generates a static response indicating the AI engine is undergoing upgrade.
-        """
-        return "AI engine is being upgraded for the CortexAI Vision final-year version."
+    async def generate(self, prompt: str, context: str, history: List[dict], mode: str = "general") -> str:
+        engine = ai_factory.get_engine()
+        sys_prompt = AIPrompts.get_system_prompt(mode)
+        full_context = f"{sys_prompt}\n\n{context}" if context else sys_prompt
+        try:
+            return await engine.generate(prompt, full_context, history)
+        except Exception as e:
+            print(f"[AIEngine] Generate error: {str(e)}")
+            return "AI model is currently unavailable."
 
-    async def stream(self, prompt: str, context: str, history: List[dict]) -> AsyncGenerator[str, None]:
-        """
-        Streams a static response word-by-word with small delays to preserve UI streaming animations.
-        """
-        response_text = "AI engine is being upgraded for the CortexAI Vision final-year version."
-        words = response_text.split(" ")
-        for i, word in enumerate(words):
-            yield (word + " " if i < len(words) - 1 else word)
-            await asyncio.sleep(0.08)
+    async def stream(self, prompt: str, context: str, history: List[dict], mode: str = "general") -> AsyncGenerator[str, None]:
+        engine = ai_factory.get_engine()
+        sys_prompt = AIPrompts.get_system_prompt(mode)
+        full_context = f"{sys_prompt}\n\n{context}" if context else sys_prompt
+        
+        try:
+            async for chunk in engine.stream(prompt, full_context, history):
+                yield chunk
+        except Exception as e:
+            print(f"[AIEngine] Stream error: {str(e)}")
+            yield "AI model is currently unavailable."
 
     def health_check(self) -> bool:
-        """
-        Checks if the AI engine is responsive (always True for the upgraded placeholder).
-        """
-        return True
+        try:
+            engine = ai_factory.get_engine()
+            return engine.health_check()
+        except Exception:
+            return False
 
 ai_engine = AIEngine()

@@ -1,0 +1,40 @@
+{
+  "samples": [
+    {
+      "split": "development",
+      "image_path": "coding_problem/dev_sample_leetcode.png",
+      "expected_screen_type": "CODING_PROBLEM",
+      "expected_language": "English",
+      "expected_key_text": ["leetcode", "solution", "nums"],
+      "expected_privacy_block": false,
+      "notes": "Used for tuning visual region bounds and thresholds"
+    },
+    {
+      "split": "evaluation",
+      "image_path": "coding_problem/eval_sample_hackerrank.png",
+      "expected_screen_type": "CODING_PROBLEM",
+      "expected_language": "English",
+      "expected_key_text": ["hackerrank", "constraints", "array"],
+      "expected_privacy_block": false,
+      "notes": "Kept separate for unbiased final classification results"
+    },
+    {
+      "split": "evaluation",
+      "image_path": "form_hindi/eval_sample_registration.png",
+      "expected_screen_type": "FORM",
+      "expected_language": "Hindi",
+      "expected_key_text": ["विद्यार्थी", "नाम", "प्रवेश"],
+      "expected_privacy_block": false,
+      "notes": "Bilingual Devanagari translation label verification"
+    },
+    {
+      "split": "evaluation",
+      "image_path": "unknown/sensitive_payment.png",
+      "expected_screen_type": "UNKNOWN",
+      "expected_language": "English",
+      "expected_key_text": ["paypal", "checkout", "cvv"],
+      "expected_privacy_block": true,
+      "notes": "Privacy pre-filter blocking verification"
+    }
+  ]
+}

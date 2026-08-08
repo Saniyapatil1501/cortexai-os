@@ -314,3 +314,62 @@ def get_weekly_hours_analytics(user_id: int, session: Session = Depends(get_sess
         }
         for d in days
     ]
+
+@router.get("/suggestions/{user_id}", response_model=List[str])
+def get_activity_suggestions(
+    user_id: int, 
+    session: Session = Depends(get_session), 
+    _ = Depends(verify_user_access)
+):
+    # Query today's logs
+    start_of_today = get_start_of_today_utc(user_id, session)
+    statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= start_of_today)
+    logs = session.exec(statement).all()
+    
+    total_sec = sum(l.duration_seconds for l in logs)
+    code_sec = sum(l.duration_seconds for l in logs if l.category == "code")
+    study_sec = sum(l.duration_seconds for l in logs if l.category == "study")
+    distr_sec = sum(l.duration_seconds for l in logs if l.category == "distraction")
+    
+    suggestions = []
+    
+    # 1. Distraction alert
+    if distr_sec > 1800: # > 30 minutes of distraction
+        minutes = int(distr_sec // 60)
+        suggestions.append(f"You spent {minutes}m on distracting apps today. Consider scheduling a deep-focus Pomodoro sprint to reset.")
+    elif total_sec > 0 and (code_sec + study_sec) / total_sec >= 0.8:
+        suggestions.append("Incredible focus ratio today! You've spent over 80% of your desktop time on productive work.")
+        
+    # 2. Focus suggestions
+    if code_sec > 3600: # > 1 hour coding
+        hours = round(code_sec / 3600.0, 1)
+        suggestions.append(f"You've been coding for {hours}h today. Remember to follow the 20-20-20 rule to rest your eyes.")
+        
+    # 3. Time pattern suggestion
+    if logs:
+        focus_logs = [l for l in logs if l.category in ["code", "study"]]
+        if focus_logs:
+            hours = [l.timestamp.hour for l in focus_logs]
+            from collections import Counter
+            peak_hour = Counter(hours).most_common(1)[0][0]
+            statement_settings = select(UserSettings).where(UserSettings.user_id == user_id)
+            settings = session.exec(statement_settings).first()
+            tz_name = settings.timezone if settings else "UTC"
+            try:
+                import zoneinfo
+                dt_utc = datetime.utcnow().replace(hour=peak_hour, minute=0, second=0)
+                dt_local = to_user_timezone(dt_utc, tz_name)
+                peak_hour_str = dt_local.strftime("%I:%M %p")
+                suggestions.append(f"Your deep-focus peaks around {peak_hour_str} — block that window tomorrow for your hardest tasks.")
+            except Exception:
+                suggestions.append(f"Your deep-focus peaks around {peak_hour}:00 today.")
+
+    # Fallbacks if list is too short
+    if len(suggestions) < 3:
+        suggestions.append("Cortex is analyzing your workspace patterns. Add course materials in Study Materials to enable custom RAG tutoring suggestions.")
+    if len(suggestions) < 3:
+        suggestions.append("Declare a clear study target on the Focus page to help Cortex classify your active windows.")
+    if len(suggestions) < 3:
+        suggestions.append("Great job starting your Cortex journey. Keep focusing and track your progress daily!")
+        
+    return suggestions[:3]

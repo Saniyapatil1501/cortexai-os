@@ -3,14 +3,14 @@ const BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 let tokenGetter: (() => Promise<string | null>) | null = null;
 
 async function authedFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const headers = { 
-    ...options.headers 
+  const headers = {
+    ...options.headers,
   } as Record<string, string>;
-  
+
   if (!(options.body instanceof FormData)) {
     headers["Content-Type"] = "application/json";
   }
-  
+
   if (tokenGetter) {
     try {
       const token = await tokenGetter();
@@ -21,7 +21,7 @@ async function authedFetch(url: string, options: RequestInit = {}): Promise<Resp
       console.error("Failed to retrieve auth token", e);
     }
   }
-  
+
   const res = await fetch(url, { ...options, headers });
   if (!res.ok) {
     const errorText = await res.text().catch(() => "");
@@ -116,6 +116,7 @@ export interface DocumentChunkItem {
   content: string;
   token_count: number;
   created_at: string;
+  page_number?: number;
 }
 
 export interface SearchResultItem {
@@ -166,7 +167,10 @@ export const cortexClient = {
     return res.json();
   },
 
-  async updateUserSettings(userId: number, data: Partial<UserSettingsData>): Promise<UserSettingsData> {
+  async updateUserSettings(
+    userId: number,
+    data: Partial<UserSettingsData>,
+  ): Promise<UserSettingsData> {
     const res = await authedFetch(`${BASE_URL}/auth/settings/${userId}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -174,18 +178,34 @@ export const cortexClient = {
     return res.json();
   },
 
-  async startFocusSession(userId: number, intention: string, targetDurationSeconds?: number): Promise<FocusSession> {
+  async startFocusSession(
+    userId: number,
+    intention: string,
+    targetDurationSeconds?: number,
+  ): Promise<FocusSession> {
     const res = await authedFetch(`${BASE_URL}/sessions/start`, {
       method: "POST",
-      body: JSON.stringify({ user_id: userId, intention, target_duration_seconds: targetDurationSeconds }),
+      body: JSON.stringify({
+        user_id: userId,
+        intention,
+        target_duration_seconds: targetDurationSeconds,
+      }),
     });
     return res.json();
   },
 
-  async endFocusSession(sessionId: number, completed: boolean, distractionCount: number): Promise<FocusSession> {
+  async endFocusSession(
+    sessionId: number,
+    completed: boolean,
+    distractionCount: number,
+  ): Promise<any> {
     const res = await authedFetch(`${BASE_URL}/sessions/end`, {
       method: "POST",
-      body: JSON.stringify({ session_id: sessionId, completed, distraction_count: distractionCount }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        completed,
+        distraction_count: distractionCount,
+      }),
     });
     return res.json();
   },
@@ -201,12 +221,24 @@ export const cortexClient = {
     }
   },
 
+  async getRecentFocusSessions(userId: number, limit: number = 4): Promise<FocusSession[]> {
+    const res = await authedFetch(`${BASE_URL}/sessions/recent/${userId}?limit=${limit}`);
+    return res.json();
+  },
+
   async getActivitySummary(userId: number): Promise<ActivitySummary> {
     const res = await authedFetch(`${BASE_URL}/activities/summary/${userId}`);
     return res.json();
   },
 
-  async getProductivityAnalytics(userId: number): Promise<{ day: string; focus: number; distraction: number }[]> {
+  async getSuggestions(userId: number): Promise<string[]> {
+    const res = await authedFetch(`${BASE_URL}/activities/suggestions/${userId}`);
+    return res.json();
+  },
+
+  async getProductivityAnalytics(
+    userId: number,
+  ): Promise<{ day: string; focus: number; distraction: number }[]> {
     const res = await authedFetch(`${BASE_URL}/activities/analytics/productivity/${userId}`);
     return res.json();
   },
@@ -216,7 +248,9 @@ export const cortexClient = {
     return res.json();
   },
 
-  async getAppsAnalytics(userId: number): Promise<{ name: string; time: string; pct: number; type: string }[]> {
+  async getAppsAnalytics(
+    userId: number,
+  ): Promise<{ name: string; time: string; pct: number; type: string }[]> {
     const res = await authedFetch(`${BASE_URL}/activities/analytics/apps/${userId}`);
     return res.json();
   },
@@ -226,7 +260,9 @@ export const cortexClient = {
     return res.json();
   },
 
-  async getWeeklyHoursAnalytics(userId: number): Promise<{ d: string; code: number; study: number }[]> {
+  async getWeeklyHoursAnalytics(
+    userId: number,
+  ): Promise<{ d: string; code: number; study: number }[]> {
     const res = await authedFetch(`${BASE_URL}/activities/analytics/weekly_hours/${userId}`);
     return res.json();
   },
@@ -236,15 +272,28 @@ export const cortexClient = {
     return res.json();
   },
 
-  async createReminder(userId: number, title: string, description: string, recurrenceInterval: string): Promise<ReminderItem> {
+  async createReminder(
+    userId: number,
+    title: string,
+    description: string,
+    recurrenceInterval: string,
+  ): Promise<ReminderItem> {
     const res = await authedFetch(`${BASE_URL}/reminders/`, {
       method: "POST",
-      body: JSON.stringify({ user_id: userId, title, description, recurrence_interval: recurrenceInterval }),
+      body: JSON.stringify({
+        user_id: userId,
+        title,
+        description,
+        recurrence_interval: recurrenceInterval,
+      }),
     });
     return res.json();
   },
 
-  async updateReminder(reminderId: number, data: { is_enabled?: boolean; title?: string; recurrence_interval?: string }): Promise<ReminderItem> {
+  async updateReminder(
+    reminderId: number,
+    data: { is_enabled?: boolean; title?: string; recurrence_interval?: string },
+  ): Promise<ReminderItem> {
     const res = await authedFetch(`${BASE_URL}/reminders/${reminderId}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -252,21 +301,67 @@ export const cortexClient = {
     return res.json();
   },
 
-  async chatStream(userId: number, message: string, onChunk: (chunk: string) => void): Promise<void> {
+  async chatStream(
+    userId: number,
+    message: string,
+    mode: string,
+    documentId: string,
+    onChunk: (chunk: string) => void,
+    onReferences?: (refs: { filename: string; page?: number; chunk?: number }[]) => void,
+  ): Promise<void> {
     const response = await authedFetch(`${BASE_URL}/assistant/chat`, {
       method: "POST",
-      body: JSON.stringify({ user_id: userId, message }),
+      body: JSON.stringify({
+        user_id: userId,
+        message,
+        mode,
+        document_id: documentId === "all" ? null : Number(documentId),
+      }),
     });
 
     if (!response.body) return;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
+    let buffer = "";
+
+    const processLines = (eventString: string) => {
+      const lines = eventString.split("\n");
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const jsonStr = line.substring(6).trim();
+            if (!jsonStr) continue;
+            const payload = JSON.parse(jsonStr);
+            if (payload.token) {
+              onChunk(payload.token);
+            }
+            if (payload.references && onReferences) {
+              onReferences(payload.references);
+            }
+            if (payload.error) {
+              onChunk(payload.error);
+            }
+          } catch (e) {
+            console.error("Failed to parse SSE line:", line, e);
+          }
+        }
+      }
+    };
 
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      onChunk(chunk);
+      if (done) {
+        if (buffer) {
+          processLines(buffer);
+        }
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        processLines(part);
+      }
     }
   },
 
@@ -309,30 +404,99 @@ export const cortexClient = {
     const res = await authedFetch(`${BASE_URL}/documents/${documentId}/chunks`);
     return res.json();
   },
-  
-  async getDocumentStatus(documentId: number): Promise<{ id: number; status: string; chunk_count: number }> {
+
+  async getDocumentStatus(
+    documentId: number,
+  ): Promise<{ id: number; status: string; chunk_count: number }> {
     const res = await authedFetch(`${BASE_URL}/documents/${documentId}/status`);
     return res.json();
   },
 
-  async semanticSearch(userId: number, query: string, documentId?: number, topK: number = 5): Promise<SearchResponse> {
+  async semanticSearch(
+    userId: number,
+    query: string,
+    documentId?: number,
+    topK: number = 5,
+  ): Promise<SearchResponse> {
     const res = await authedFetch(`${BASE_URL}/rag/search`, {
       method: "POST",
       body: JSON.stringify({
         user_id: userId,
         query,
         document_id: documentId || null,
-        top_k: topK
-      })
+        top_k: topK,
+      }),
     });
     return res.json();
   },
 
   async reindex(): Promise<{ status: string; message: string }> {
     const res = await authedFetch(`${BASE_URL}/documents/reindex`, {
-      method: "POST"
+      method: "POST",
     });
     return res.json();
-  }
-};
+  },
 
+  async getSessionTimeline(sessionId: number): Promise<any[]> {
+    const res = await authedFetch(`${BASE_URL}/sessions/timeline/${sessionId}`);
+    return res.json();
+  },
+
+  async submitFeedbackCorrection(data: {
+    user_id: number;
+    app_name: string;
+    window_title: string;
+    study_goal: string;
+    predicted_label: string;
+    corrected_label: string;
+  }): Promise<{ status: string; correction_id: number }> {
+    const res = await authedFetch(`${BASE_URL}/sessions/correct`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  async checkStuckStatus(userId: number): Promise<{
+    stuck_score: number;
+    is_stuck: boolean;
+    trigger_reason: string;
+    signals: Record<string, number>;
+  }> {
+    const res = await authedFetch(`${BASE_URL}/vision/stuck-check/${userId}`);
+    return res.json();
+  },
+
+  async analyzeScreen(data: {
+    user_id: number;
+    app_name: string;
+    window_title: string;
+    study_goal: string;
+    image_base64?: string;
+  }): Promise<{
+    status: string;
+    screen_type: string;
+    detected_language: string;
+    analysis: string;
+    structured_regions: { type: string; text: string; bbox: number[] }[];
+    performance: {
+      capture_time_ms: number;
+      preprocessing_time_ms: number;
+      ocr_time_ms: number;
+      context_fusion_time_ms: number;
+      genai_latency_ms: number;
+      total_latency_ms: number;
+    };
+  }> {
+    const res = await authedFetch(`${BASE_URL}/vision/analyze`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
+
+  async getAssistantHealth(): Promise<{ status: "ok" | "offline" }> {
+    const res = await authedFetch(`${BASE_URL}/assistant/health`);
+    return res.json();
+  },
+};

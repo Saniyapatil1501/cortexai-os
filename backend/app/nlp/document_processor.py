@@ -216,11 +216,59 @@ class DocumentProcessor:
 
     def process_document(self, file_path: str, file_type: str) -> List[Dict]:
         """
-        Runs text extraction, cleaning, and semantic chunking on a local file path.
+        Runs text extraction, cleaning, and semantic chunking, preserving page numbers for PDFs.
         """
-        raw_text = self.extract_text(file_path, file_type)
-        cleaned_text = self.clean_text(raw_text)
-        return self.chunk_text(cleaned_text)
+        file_type = file_type.lower().strip(".")
+        chunks = []
+        chunk_idx = 0
+        
+        if file_type == "pdf":
+            try:
+                reader = pypdf.PdfReader(file_path)
+                if reader.is_encrypted:
+                    raise ValueError("Password-protected or encrypted PDF documents are not supported.")
+                
+                for i, page in enumerate(reader.pages):
+                    page_number = i + 1
+                    page_text = page.extract_text()
+                    if not page_text or not page_text.strip():
+                        continue
+                    
+                    cleaned_page_text = self.clean_text(page_text)
+                    page_chunks = self.chunk_text(cleaned_page_text, chunk_size=600, overlap=80)
+                    
+                    for pc in page_chunks:
+                        chunks.append({
+                            "chunk_index": chunk_idx,
+                            "content": pc["content"],
+                            "token_count": pc["token_count"],
+                            "page_number": page_number
+                        })
+                        chunk_idx += 1
+                        
+                if not chunks:
+                    raise ValueError("Scanned/image-based document detected. OCR support will be added in the Computer Vision phase.")
+                return chunks
+            except Exception as e:
+                if "scanned" in str(e).lower() or "image-based" in str(e).lower() or "protected" in str(e).lower():
+                    raise e
+                raise ValueError(f"Failed to parse PDF document: {str(e)}")
+                
+        elif file_type in ["txt", "md"]:
+            raw_text = self.extract_text(file_path, file_type)
+            cleaned_text = self.clean_text(raw_text)
+            raw_chunks = self.chunk_text(cleaned_text, chunk_size=600, overlap=80)
+            for rc in raw_chunks:
+                chunks.append({
+                    "chunk_index": chunk_idx,
+                    "content": rc["content"],
+                    "token_count": rc["token_count"],
+                    "page_number": None
+                })
+                chunk_idx += 1
+            return chunks
+        else:
+            raise ValueError(f"Unsupported file format: {file_type}")
 
 # Singleton helper
 doc_processor = DocumentProcessor()

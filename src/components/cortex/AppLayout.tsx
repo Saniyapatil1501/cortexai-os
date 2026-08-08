@@ -66,7 +66,9 @@ function startRemindersLoop(userId: number) {
           continue;
         }
 
-        const durationMatch = intervalStr.match(/every\s+(\d+)\s*(m|min|minute|minutes|h|hr|hour|hours)?/);
+        const durationMatch = intervalStr.match(
+          /every\s+(\d+)\s*(m|min|minute|minutes|h|hr|hour|hours)?/,
+        );
         if (durationMatch) {
           let mins = parseInt(durationMatch[1], 10);
           const unit = durationMatch[2] || "m";
@@ -125,8 +127,14 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
 
-  const { user, isLoading: isAuthLoading, isBackendOffline, isSignedIn, isClerkLoaded } = useCortexAuth();
-  
+  const {
+    user,
+    isLoading: isAuthLoading,
+    isBackendOffline,
+    isSignedIn,
+    isClerkLoaded,
+  } = useCortexAuth();
+
   // Theme state
   const [theme, setTheme] = useState<string>(() => {
     if (typeof window !== "undefined") {
@@ -134,20 +142,35 @@ export function AppLayout({ children }: { children: ReactNode }) {
     }
     return "matte_black";
   });
-  
+
   // Search/Command palette state
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Guard redirects
   useEffect(() => {
-    console.log("[CortexAuth] AppLayout guard check. path:", path, "isClerkLoaded:", isClerkLoaded, "isAuthLoading:", isAuthLoading, "isSignedIn:", isSignedIn, "hasUser:", user ? "Yes" : "No");
+    console.log(
+      "[CortexAuth] AppLayout guard check. path:",
+      path,
+      "isClerkLoaded:",
+      isClerkLoaded,
+      "isAuthLoading:",
+      isAuthLoading,
+      "isSignedIn:",
+      isSignedIn,
+      "hasUser:",
+      user ? "Yes" : "No",
+    );
     if (isClerkLoaded && !isAuthLoading) {
       if (!isSignedIn) {
-        console.log("[CortexAuth] Guard check failed: User is not signed in to Clerk. Redirecting to /login...");
+        console.log(
+          "[CortexAuth] Guard check failed: User is not signed in to Clerk. Redirecting to /login...",
+        );
         navigate({ to: "/login" });
       } else if (!user && isBackendOffline) {
-        console.log("[CortexAuth] Guard check: Clerk signed in but backend is offline. Let user stay.");
+        console.log(
+          "[CortexAuth] Guard check: Clerk signed in but backend is offline. Let user stay.",
+        );
       }
     }
   }, [isClerkLoaded, isAuthLoading, isSignedIn, user, isBackendOffline, navigate, path]);
@@ -162,12 +185,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
   // Fetch settings theme
   useEffect(() => {
     if (user?.user_id) {
-      cortexClient.getUserSettings(user.user_id).then((settings) => {
-        if (settings && settings.theme) {
-          setTheme(settings.theme);
-          localStorage.setItem("cortex-theme", settings.theme);
-        }
-      }).catch(console.error);
+      cortexClient
+        .getUserSettings(user.user_id)
+        .then((settings) => {
+          if (settings && settings.theme) {
+            setTheme(settings.theme);
+            localStorage.setItem("cortex-theme", settings.theme);
+          }
+        })
+        .catch(console.error);
     }
   }, [user?.user_id]);
 
@@ -277,7 +303,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
               <Menu className="h-4 w-4" />
             </button>
 
-            <div 
+            <div
               onClick={() => setSearchOpen(true)}
               className="hidden md:flex items-center gap-2 rounded-md border border-border bg-surface-1/60 px-3 py-1.5 w-[360px] max-w-full no-drag-region cursor-pointer hover:bg-surface-2/40 transition"
             >
@@ -356,18 +382,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
       {/* Cmd+K Command Palette Modal */}
       {searchOpen && (
-        <div 
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[15vh] p-4" 
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[15vh] p-4"
           onClick={() => setSearchOpen(false)}
         >
-          <div 
+          <div
             className="w-full max-w-lg rounded-lg border border-border bg-surface-1/95 shadow-2xl overflow-hidden p-2 no-drag-region"
             onClick={(e) => e.stopPropagation()}
           >
             <Cmdk className="w-full">
               <div className="flex items-center border-b border-border px-3 py-2.5">
                 <Search className="h-4 w-4 mr-2.5 text-muted-foreground" />
-                <Cmdk.Input 
+                <Cmdk.Input
                   autoFocus
                   value={searchQuery}
                   onValueChange={setSearchQuery}
@@ -382,7 +408,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
                     }
                   }}
                 />
-                <button 
+                <button
                   onClick={() => setSearchOpen(false)}
                   className="text-[10px] bg-surface-2 px-1.5 py-0.5 rounded text-muted-foreground border border-border cursor-pointer"
                 >
@@ -390,53 +416,79 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 </button>
               </div>
               <Cmdk.List className="max-h-[300px] overflow-y-auto p-1.5 space-y-1">
-                <Cmdk.Empty className="text-xs text-muted-foreground p-3 text-center">No results found.</Cmdk.Empty>
-                
-                <Cmdk.Group heading="Navigation" className="text-[10px] font-semibold text-muted-foreground px-2.5 py-1 uppercase tracking-wider">
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/dashboard" }); setSearchOpen(false); }}
+                <Cmdk.Empty className="text-xs text-muted-foreground p-3 text-center">
+                  No results found.
+                </Cmdk.Empty>
+
+                <Cmdk.Group
+                  heading="Navigation"
+                  className="text-[10px] font-semibold text-muted-foreground px-2.5 py-1 uppercase tracking-wider"
+                >
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/dashboard" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <LayoutDashboard className="h-4 w-4 text-muted-foreground" />
                     <span>Dashboard</span>
                   </Cmdk.Item>
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/assistant" }); setSearchOpen(false); }}
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/assistant" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <Sparkles className="h-4 w-4 text-muted-foreground" />
                     <span>AI Assistant</span>
                   </Cmdk.Item>
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/focus" }); setSearchOpen(false); }}
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/focus" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <Timer className="h-4 w-4 text-muted-foreground" />
                     <span>Focus Timer</span>
                   </Cmdk.Item>
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/analytics" }); setSearchOpen(false); }}
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/analytics" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <BarChart3 className="h-4 w-4 text-muted-foreground" />
                     <span>Analytics Insights</span>
                   </Cmdk.Item>
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/materials" }); setSearchOpen(false); }}
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/materials" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <BookOpen className="h-4 w-4 text-muted-foreground" />
                     <span>Study Materials</span>
                   </Cmdk.Item>
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/reminders" }); setSearchOpen(false); }}
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/reminders" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <Bell className="h-4 w-4 text-muted-foreground" />
                     <span>Reminders</span>
                   </Cmdk.Item>
-                  <Cmdk.Item 
-                    onSelect={() => { navigate({ to: "/settings" }); setSearchOpen(false); }}
+                  <Cmdk.Item
+                    onSelect={() => {
+                      navigate({ to: "/settings" });
+                      setSearchOpen(false);
+                    }}
                     className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-foreground hover:bg-surface-2 cursor-pointer transition"
                   >
                     <Settings className="h-4 w-4 text-muted-foreground" />

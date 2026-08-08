@@ -10,7 +10,10 @@ export const Route = createFileRoute("/reminders")({
   head: () => ({
     meta: [
       { title: "Reminders — CortexAI" },
-      { name: "description", content: "Gentle, intelligent reminders that protect your body and your focus." },
+      {
+        name: "description",
+        content: "Gentle, intelligent reminders that protect your body and your focus.",
+      },
     ],
   }),
   component: RemindersPage,
@@ -19,9 +22,11 @@ export const Route = createFileRoute("/reminders")({
 function getReminderIcon(title: string) {
   const t = title.toLowerCase();
   if (t.includes("hydra") || t.includes("water") || t.includes("drink")) return Droplets;
-  if (t.includes("posture") || t.includes("sit") || t.includes("shoulder") || t.includes("back")) return Activity;
+  if (t.includes("posture") || t.includes("sit") || t.includes("shoulder") || t.includes("back"))
+    return Activity;
   if (t.includes("study") || t.includes("reflect") || t.includes("read")) return BookOpen;
-  if (t.includes("code") || t.includes("screen") || t.includes("pr") || t.includes("dev")) return Code2;
+  if (t.includes("code") || t.includes("screen") || t.includes("pr") || t.includes("dev"))
+    return Code2;
   return Bell;
 }
 
@@ -30,7 +35,7 @@ function RemindersPage() {
   const userId = user?.user_id;
 
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
-  
+
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [modalType, setModalType] = useState<"create" | "configure">("create");
@@ -41,15 +46,21 @@ function RemindersPage() {
 
   useEffect(() => {
     if (!userId) return;
-    cortexClient.getReminders(userId).then((data) => {
-      setReminders(data);
-    }).catch(console.error);
+    cortexClient
+      .getReminders(userId)
+      .then((data) => {
+        setReminders(data);
+      })
+      .catch(console.error);
   }, [userId]);
 
   const handleToggle = (id: number, currentVal: boolean) => {
-    cortexClient.updateReminder(id, { is_enabled: !currentVal }).then((updated) => {
-      setReminders((prev) => prev.map((x) => (x.id === id ? updated : x)));
-    }).catch(console.error);
+    cortexClient
+      .updateReminder(id, { is_enabled: !currentVal })
+      .then((updated) => {
+        setReminders((prev) => prev.map((x) => (x.id === id ? updated : x)));
+      })
+      .catch(console.error);
   };
 
   const handleOpenCreateModal = () => {
@@ -69,7 +80,7 @@ function RemindersPage() {
 
   const handleSaveReminder = async () => {
     if (!userId) return;
-    
+
     if (modalType === "create") {
       if (!title.trim() || !interval.trim()) return;
       try {
@@ -82,7 +93,9 @@ function RemindersPage() {
     } else if (modalType === "configure" && selectedReminder) {
       if (!interval.trim()) return;
       try {
-        const updated = await cortexClient.updateReminder(selectedReminder.id, { recurrence_interval: interval });
+        const updated = await cortexClient.updateReminder(selectedReminder.id, {
+          recurrence_interval: interval,
+        });
         setReminders((prev) => prev.map((x) => (x.id === selectedReminder.id ? updated : x)));
         setModalOpen(false);
       } catch (e) {
@@ -123,7 +136,7 @@ function RemindersPage() {
               </div>
               <div className="mt-4 flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">{it.recurrence_interval}</span>
-                <button 
+                <button
                   onClick={() => handleOpenConfigureModal(it)}
                   className="text-foreground/80 hover:text-foreground cursor-pointer"
                 >
@@ -137,18 +150,18 @@ function RemindersPage() {
 
       {/* Premium custom modal overlay */}
       {modalOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 cursor-pointer"
           onClick={() => setModalOpen(false)}
         >
-          <div 
+          <div
             className="relative w-full max-w-md rounded-lg border border-border bg-surface-1/95 p-6 shadow-2xl cursor-default"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-lg font-semibold tracking-tight text-foreground mb-4">
               {modalType === "create" ? "New Reminder" : "Configure Recurrence"}
             </h3>
-            
+
             <div className="space-y-4">
               {modalType === "create" && (
                 <>
@@ -172,9 +185,11 @@ function RemindersPage() {
                   </label>
                 </>
               )}
-              
+
               <label className="block">
-                <span className="block text-xs text-muted-foreground mb-1.5">Recurrence Interval</span>
+                <span className="block text-xs text-muted-foreground mb-1.5">
+                  Recurrence Interval
+                </span>
                 <input
                   placeholder="e.g. every 30m or at 3:30 PM"
                   value={interval}
@@ -183,7 +198,7 @@ function RemindersPage() {
                 />
               </label>
             </div>
-            
+
             <div className="mt-6 flex justify-end gap-2 text-sm">
               <button
                 onClick={() => setModalOpen(false)}
@@ -193,7 +208,9 @@ function RemindersPage() {
               </button>
               <button
                 onClick={handleSaveReminder}
-                disabled={modalType === "create" ? (!title.trim() || !interval.trim()) : !interval.trim()}
+                disabled={
+                  modalType === "create" ? !title.trim() || !interval.trim() : !interval.trim()
+                }
                 className="rounded-md bg-foreground text-background font-medium px-4 py-2 hover:opacity-90 transition disabled:opacity-50 cursor-pointer"
               >
                 Save

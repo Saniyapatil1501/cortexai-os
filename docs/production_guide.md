@@ -33,7 +33,9 @@ CortexAI operates as a hybrid desktop-local daemon application:
 ## 2. Environment Setup
 
 ### Frontend (.env)
+
 Create a `.env` file in the root of the project:
+
 ```env
 # Clerk Publishable Key (from dashboard)
 VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
@@ -49,7 +51,9 @@ VITE_SENTRY_DSN=
 ```
 
 ### Backend (backend/.env)
+
 Create a `.env` file in the `backend` folder:
+
 ```env
 HOST=127.0.0.1
 PORT=8000
@@ -89,7 +93,9 @@ SENTRY_DSN=
    The installer will be generated under the `dist/` directory.
 
 ### Python Backend Packaging
+
 To package the local Python backend alongside Electron, you can compile the Python server into a single executable using `pyinstaller` and bundle it inside Electron's extraResources:
+
 1. Compile backend:
    ```bash
    cd backend
@@ -102,6 +108,7 @@ To package the local Python backend alongside Electron, you can compile the Pyth
 ## 4. Security Overview
 
 CortexAI adheres to strict desktop security principles:
+
 - **No Node.js Integration in Renderer**: `nodeIntegration` is disabled, and `contextIsolation` is enabled in `electron/main.ts`.
 - **Content Security Policy (CSP)**: An explicit CSP header in the root routing prevents cross-site scripting (XSS) and unauthorized network leaks.
 - **Secure Key Storage**: All critical AI keys (`GEMINI_API_KEY`) and Clerk credentials (`CLERK_SECRET_KEY`) reside exclusively in the backend `.env` variables and are never bundled or exposed to the renderer client.

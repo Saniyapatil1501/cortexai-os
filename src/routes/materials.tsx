@@ -1,20 +1,20 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AppLayout } from "@/components/cortex/AppLayout";
 import { Card, PageHeader, Button } from "@/components/cortex/ui";
-import { 
-  Plus, 
-  Trash2, 
-  Eye, 
-  BookOpen, 
-  FileText, 
-  FileCode, 
-  Upload, 
-  AlertCircle, 
-  Loader2, 
-  CheckCircle2, 
+import {
+  Plus,
+  Trash2,
+  Eye,
+  BookOpen,
+  FileText,
+  FileCode,
+  Upload,
+  AlertCircle,
+  Loader2,
+  CheckCircle2,
   X,
   FileUp,
-  Search
+  Search,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { cortexClient, DocumentItem, DocumentChunkItem, SearchResultItem } from "@/lib/api";
@@ -25,7 +25,10 @@ export const Route = createFileRoute("/materials")({
   head: () => ({
     meta: [
       { title: "Study Materials — CortexAI" },
-      { name: "description", content: "Manage your local course materials, papers, and text documents." },
+      {
+        name: "description",
+        content: "Manage your local course materials, papers, and text documents.",
+      },
     ],
   }),
   component: StudyMaterialsPage,
@@ -69,12 +72,13 @@ function StudyMaterialsPage() {
   const [chunksLoading, setChunksLoading] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [highlightedChunkIndex, setHighlightedChunkIndex] = useState<number | null>(null);
-  
+
   const highlightedRef = useRef<HTMLDivElement>(null);
 
   const fetchDocuments = () => {
     if (!userId) return;
-    cortexClient.getDocuments(userId)
+    cortexClient
+      .getDocuments(userId)
       .then((data) => {
         setDocuments(data);
         setLoading(false);
@@ -97,14 +101,16 @@ function StudyMaterialsPage() {
   useEffect(() => {
     if (!userId || isBackendOffline) return;
 
-    const needsPolling = documents.some(d => d.status === "processing" || d.status === "embedding");
+    const needsPolling = documents.some(
+      (d) => d.status === "processing" || d.status === "embedding",
+    );
     if (!needsPolling) return;
 
     const interval = setInterval(async () => {
       try {
         const data = await cortexClient.getDocuments(userId);
         const hasStatusChange = data.some((newDoc) => {
-          const oldDoc = documents.find(d => d.id === newDoc.id);
+          const oldDoc = documents.find((d) => d.id === newDoc.id);
           return oldDoc && oldDoc.status !== newDoc.status;
         });
 
@@ -180,7 +186,7 @@ function StudyMaterialsPage() {
       const newDoc = await cortexClient.uploadDocument(userId, file);
       toast.dismiss(toastId);
       toast.success(`"${filename}" uploaded successfully. Parsing and embedding text...`);
-      setDocuments(prev => [newDoc, ...prev]);
+      setDocuments((prev) => [newDoc, ...prev]);
     } catch (err: any) {
       toast.dismiss(toastId);
       const errorMsg = err.message || "Failed to upload document.";
@@ -200,8 +206,8 @@ function StudyMaterialsPage() {
     try {
       await cortexClient.deleteDocument(docId);
       toast.success("Document and its vectors deleted");
-      setDocuments(prev => prev.filter(d => d.id !== docId));
-      setSearchResults(prev => prev.filter(r => r.document_id !== docId));
+      setDocuments((prev) => prev.filter((d) => d.id !== docId));
+      setSearchResults((prev) => prev.filter((r) => r.document_id !== docId));
       if (selectedDoc?.id === docId) {
         setModalOpen(false);
         setSelectedDoc(null);
@@ -234,7 +240,7 @@ function StudyMaterialsPage() {
 
     setSearching(true);
     const targetDocId = searchDocId === "all" ? undefined : Number(searchDocId);
-    
+
     try {
       const response = await cortexClient.semanticSearch(userId, searchQuery, targetDocId, 5);
       setSearchResults(response.results);
@@ -247,7 +253,9 @@ function StudyMaterialsPage() {
   };
 
   const handleReindex = async () => {
-    const confirmReindex = window.confirm("Are you sure you want to rebuild the entire vector index from current database chunks?");
+    const confirmReindex = window.confirm(
+      "Are you sure you want to rebuild the entire vector index from current database chunks?",
+    );
     if (!confirmReindex) return;
 
     setReindexing(true);
@@ -268,11 +276,15 @@ function StudyMaterialsPage() {
   if (isBackendOffline) {
     return (
       <AppLayout>
-        <PageHeader title="Study Materials" description="Manage your course notes, textbook PDFs, or text documents." />
+        <PageHeader
+          title="Study Materials"
+          description="Manage your course notes, textbook PDFs, or text documents."
+        />
         <div className="flex h-[50vh] flex-col items-center justify-center gap-4 text-center">
           <div className="text-lg font-medium text-destructive">Daemon Offline</div>
           <div className="max-w-md text-sm text-muted-foreground">
-            The CortexAI Desktop Daemon is currently offline. Please ensure the backend is running and try again.
+            The CortexAI Desktop Daemon is currently offline. Please ensure the backend is running
+            and try again.
           </div>
         </div>
       </AppLayout>
@@ -281,15 +293,18 @@ function StudyMaterialsPage() {
 
   return (
     <AppLayout>
-      <PageHeader 
-        title="Study Materials" 
+      <PageHeader
+        title="Study Materials"
         description="Upload course notes, textbook PDFs, or text documents to train Cortex as your personalized tutor."
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Upload Zone & Diagnostics Column */}
         <div className="lg:col-span-1 space-y-6">
-          <Card padded={false} className="border border-dashed border-border/80 hover:border-foreground/30 transition overflow-hidden">
+          <Card
+            padded={false}
+            className="border border-dashed border-border/80 hover:border-foreground/30 transition overflow-hidden"
+          >
             <div
               onDragEnter={handleDrag}
               onDragOver={handleDrag}
@@ -314,7 +329,9 @@ function StudyMaterialsPage() {
                 <FileUp className="h-10 w-10 text-muted-foreground/80 mb-3" />
               )}
               <div className="text-sm font-medium">
-                {uploading ? "Uploading document..." : "Drag & drop study material here or click to browse"}
+                {uploading
+                  ? "Uploading document..."
+                  : "Drag & drop study material here or click to browse"}
               </div>
               <div className="text-xs text-muted-foreground mt-1.5">
                 Supports PDF, TXT, MD up to 10MB
@@ -328,15 +345,21 @@ function StudyMaterialsPage() {
             <div className="mt-4 space-y-3 text-xs">
               <div className="flex items-center justify-between text-muted-foreground">
                 <span>Embedding Model:</span>
-                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">all-MiniLM-L6-v2</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">
+                  all-MiniLM-L6-v2
+                </span>
               </div>
               <div className="flex items-center justify-between text-muted-foreground">
                 <span>Dimension:</span>
-                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">384</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">
+                  384
+                </span>
               </div>
               <div className="flex items-center justify-between text-muted-foreground">
                 <span>Vector DB Store:</span>
-                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">FAISS (L2 Flat)</span>
+                <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">
+                  FAISS (L2 Flat)
+                </span>
               </div>
               <div className="flex items-center justify-between text-muted-foreground">
                 <span>Ready Files:</span>
@@ -347,13 +370,16 @@ function StudyMaterialsPage() {
               <div className="flex items-center justify-between text-muted-foreground">
                 <span>Total Vectors:</span>
                 <span className="font-mono bg-surface-2 px-1.5 py-0.5 rounded text-foreground">
-                  {documents.reduce((acc, d) => acc + (d.status === "ready" ? d.chunk_count : 0), 0)}
+                  {documents.reduce(
+                    (acc, d) => acc + (d.status === "ready" ? d.chunk_count : 0),
+                    0,
+                  )}
                 </span>
               </div>
               <div className="pt-2 border-t border-border/40">
-                <Button 
-                  onClick={handleReindex} 
-                  disabled={reindexing || documents.length === 0} 
+                <Button
+                  onClick={handleReindex}
+                  disabled={reindexing || documents.length === 0}
                   className="w-full text-xs py-1.5 justify-center hover:opacity-90 transition"
                 >
                   {reindexing ? (
@@ -374,9 +400,12 @@ function StudyMaterialsPage() {
           <Card className="h-full flex flex-col justify-between">
             <div>
               <h3 className="text-base font-medium">Search Your Study Materials</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Query your local database semantically. Matches are retrieved from your uploaded files.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Query your local database semantically. Matches are retrieved from your uploaded
+                files.
+              </p>
             </div>
-            
+
             <div className="mt-4 flex flex-col sm:flex-row gap-2 shrink-0">
               <div className="relative flex-1">
                 <input
@@ -392,7 +421,11 @@ function StudyMaterialsPage() {
                   disabled={searching || !searchQuery.trim()}
                   className="absolute right-3 top-2.5 p-0.5 text-muted-foreground hover:text-foreground disabled:opacity-30 transition cursor-pointer"
                 >
-                  {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  {searching ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Search className="h-4 w-4" />
+                  )}
                 </button>
               </div>
 
@@ -410,10 +443,14 @@ function StudyMaterialsPage() {
                     </option>
                   ))}
               </select>
-              
+
               <Button
                 onClick={handleSearch}
-                disabled={searching || !searchQuery.trim() || documents.filter((d) => d.status === "ready").length === 0}
+                disabled={
+                  searching ||
+                  !searchQuery.trim() ||
+                  documents.filter((d) => d.status === "ready").length === 0
+                }
                 className="text-xs shrink-0 py-2 sm:px-4 justify-center hover:opacity-90 transition"
               >
                 Semantic Search
@@ -428,17 +465,22 @@ function StudyMaterialsPage() {
                 </div>
               ) : searchResults.length === 0 ? (
                 <div className="flex h-32 flex-col items-center justify-center text-xs text-muted-foreground border border-border/30 rounded-lg bg-surface-1/10 p-6 text-center">
-                  {documents.filter((d) => d.status === "ready").length === 0 
+                  {documents.filter((d) => d.status === "ready").length === 0
                     ? "Upload study documents first to make them searchable."
                     : "No search results. Enter a query above to retrieve matching content."}
                 </div>
               ) : (
                 searchResults.map((res, idx) => (
-                  <div key={idx} className="rounded-lg border border-border bg-surface-1/30 p-4 transition hover:border-foreground/20">
+                  <div
+                    key={idx}
+                    className="rounded-lg border border-border bg-surface-1/30 p-4 transition hover:border-foreground/20"
+                  >
                     <div className="flex items-center justify-between text-xs mb-2">
                       <div className="flex items-center gap-1.5 font-medium truncate max-w-xs sm:max-w-md">
                         <BookOpen className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        <span className="truncate" title={res.filename}>{res.filename}</span>
+                        <span className="truncate" title={res.filename}>
+                          {res.filename}
+                        </span>
                         <span className="text-[10px] text-muted-foreground bg-surface-2 px-1.5 py-0.5 rounded border border-border/50 shrink-0">
                           Chunk #{res.chunk_index + 1}
                         </span>
@@ -476,7 +518,9 @@ function StudyMaterialsPage() {
         <Card>
           <div className="mb-4">
             <h3 className="text-base font-medium">Your Knowledge Base</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Documents will be processed locally and chunked ready for RAG query context.</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Documents will be processed locally and chunked ready for RAG query context.
+            </p>
           </div>
 
           {loading ? (
@@ -506,12 +550,15 @@ function StudyMaterialsPage() {
                     const formattedDate = new Date(doc.created_at).toLocaleDateString(undefined, {
                       month: "short",
                       day: "numeric",
-                      year: "numeric"
+                      year: "numeric",
                     });
-                    
+
                     return (
                       <tr key={doc.id} className="hover:bg-surface-2/20 transition-colors">
-                        <td className="py-3.5 pl-3 font-medium flex items-center gap-2.5 truncate max-w-xs md:max-w-sm" title={doc.original_filename}>
+                        <td
+                          className="py-3.5 pl-3 font-medium flex items-center gap-2.5 truncate max-w-xs md:max-w-sm"
+                          title={doc.original_filename}
+                        >
                           <DocIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                           <span className="truncate">{doc.original_filename}</span>
                         </td>
@@ -538,12 +585,17 @@ function StudyMaterialsPage() {
                             </span>
                           )}
                           {doc.status === "failed" && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-rose-400" title="Processing error occurred. Scanned files require OCR.">
+                            <span
+                              className="inline-flex items-center gap-1 text-xs font-medium text-rose-400"
+                              title="Processing error occurred. Scanned files require OCR."
+                            >
                               <AlertCircle className="h-3.5 w-3.5" /> Failed
                             </span>
                           )}
                         </td>
-                        <td className="py-3.5 font-mono text-xs">{doc.status === "ready" ? doc.chunk_count : "-"}</td>
+                        <td className="py-3.5 font-mono text-xs">
+                          {doc.status === "ready" ? doc.chunk_count : "-"}
+                        </td>
                         <td className="py-3.5 text-right pr-3">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -575,11 +627,11 @@ function StudyMaterialsPage() {
 
       {/* Chunk Viewer Modal */}
       {modalOpen && selectedDoc && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200"
           onClick={() => setModalOpen(false)}
         >
-          <div 
+          <div
             className="relative w-full max-w-3xl h-[80vh] flex flex-col rounded-lg border border-border bg-surface-1/95 shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
@@ -590,10 +642,11 @@ function StudyMaterialsPage() {
                   {selectedDoc.original_filename}
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Chunks parsed: {selectedDoc.chunk_count} | Size: {formatFileSize(selectedDoc.file_size)}
+                  Chunks parsed: {selectedDoc.chunk_count} | Size:{" "}
+                  {formatFileSize(selectedDoc.file_size)}
                 </p>
               </div>
-              <button 
+              <button
                 onClick={() => setModalOpen(false)}
                 className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-surface-2 transition cursor-pointer"
               >
@@ -615,20 +668,30 @@ function StudyMaterialsPage() {
                 chunks.map((chunk, idx) => {
                   const isHighlighted = chunk.chunk_index === highlightedChunkIndex;
                   return (
-                    <div 
-                      key={chunk.id} 
+                    <div
+                      key={chunk.id}
                       ref={isHighlighted ? highlightedRef : null}
                       className={`rounded-lg border transition-all duration-300 overflow-hidden ${
-                        isHighlighted 
-                          ? "border-amber-500 bg-amber-500/5 shadow-lg shadow-amber-500/5 scale-[1.01] ring-1 ring-amber-500/30" 
+                        isHighlighted
+                          ? "border-amber-500 bg-amber-500/5 shadow-lg shadow-amber-500/5 scale-[1.01] ring-1 ring-amber-500/30"
                           : "border-border bg-surface-1/30"
                       }`}
                     >
-                      <div className={`flex items-center justify-between border-b px-4 py-2 text-xs transition-colors ${
-                        isHighlighted ? "border-amber-500/30 bg-amber-500/10" : "border-border/50 bg-surface-2/20"
-                      }`}>
-                        <span className={`font-semibold ${isHighlighted ? "text-amber-400" : "text-muted-foreground"}`}>
-                          Chunk #{idx + 1} {isHighlighted && "(Matched Source)"}
+                      <div
+                        className={`flex items-center justify-between border-b px-4 py-2 text-xs transition-colors ${
+                          isHighlighted
+                            ? "border-amber-500/30 bg-amber-500/10"
+                            : "border-border/50 bg-surface-2/20"
+                        }`}
+                      >
+                        <span
+                          className={`font-semibold ${isHighlighted ? "text-amber-400" : "text-muted-foreground"}`}
+                        >
+                          Chunk #{idx + 1}
+                          {chunk.page_number !== undefined && chunk.page_number !== null
+                            ? ` · Page ${chunk.page_number}`
+                            : ""}{" "}
+                          {isHighlighted && "(Matched Source)"}
                         </span>
                         <span className="font-mono text-[10px] bg-surface-2 px-1.5 py-0.5 rounded text-muted-foreground">
                           {chunk.token_count} Tokens (approx)
@@ -645,9 +708,7 @@ function StudyMaterialsPage() {
 
             {/* Footer */}
             <div className="border-t border-border/80 px-5 py-3 text-right bg-surface-2/30 shrink-0">
-              <Button onClick={() => setModalOpen(false)}>
-                Close Viewer
-              </Button>
+              <Button onClick={() => setModalOpen(false)}>Close Viewer</Button>
             </div>
           </div>
         </div>

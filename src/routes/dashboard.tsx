@@ -31,17 +31,80 @@ const defaultChartData: any[] = [];
 
 const defaultApps: any[] = [];
 
-const suggestions = [
-  "Your deep-focus peaks at 10:42 AM — block that window tomorrow.",
-  "You've been coding for 1h 50m. A 5-min stretch will preserve your flow.",
-  "3 unread research tabs detected. Want Cortex to summarize them?",
-];
+// suggestions array is now dynamically queried from backend API
 
 function Dashboard() {
   const navigate = useNavigate();
-  const { user, isBackendOffline } = useCortexAuth();
+  const {
+    user,
+    isBackendOffline,
+    retrySync,
+    isLoading: isAuthLoading,
+    isSignedIn,
+  } = useCortexAuth();
   const userId = user?.user_id;
   const displayName = user?.first_name || "";
+
+  const [summary, setSummary] = useState<any>(null);
+  const [chartData, setChartData] = useState<any[]>(defaultChartData);
+  const [apps, setApps] = useState<any[]>(defaultApps);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [recentSessions, setRecentSessions] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const fetchData = () => {
+      cortexClient
+        .getActivitySummary(userId)
+        .then((sum) => {
+          setSummary(sum);
+        })
+        .catch(console.error);
+
+      cortexClient
+        .getProductivityAnalytics(userId)
+        .then((chart) => {
+          if (chart && chart.length > 0) setChartData(chart);
+        })
+        .catch(console.error);
+
+      cortexClient
+        .getAppsAnalytics(userId)
+        .then((activeApps) => {
+          if (activeApps && activeApps.length > 0) setApps(activeApps.slice(0, 4));
+        })
+        .catch(console.error);
+
+      cortexClient
+        .getReminders(userId)
+        .then((rems) => {
+          if (rems && rems.length > 0) {
+            setReminders(rems.filter((r) => r.is_enabled).slice(0, 3));
+          }
+        })
+        .catch(console.error);
+
+      cortexClient
+        .getSuggestions(userId)
+        .then((sugs) => {
+          if (sugs && sugs.length > 0) setSuggestions(sugs);
+        })
+        .catch(console.error);
+
+      cortexClient
+        .getRecentFocusSessions(userId)
+        .then((recs) => {
+          if (recs) setRecentSessions(recs);
+        })
+        .catch(console.error);
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 10000); // refresh every 10s
+    return () => clearInterval(interval);
+  }, [userId]);
 
   if (isBackendOffline) {
     return (
@@ -50,14 +113,18 @@ function Dashboard() {
         <div className="flex h-[50vh] flex-col items-center justify-center gap-4 text-center">
           <div className="text-lg font-medium text-destructive">Daemon Offline</div>
           <div className="max-w-md text-sm text-muted-foreground">
-            The CortexAI Desktop Daemon is currently offline. Please ensure the backend is running and try again.
+            The CortexAI Desktop Daemon is currently offline. Please ensure the backend is running
+            and try again.
           </div>
+          <Button onClick={retrySync} className="mt-2">
+            Retry Connection
+          </Button>
         </div>
       </AppLayout>
     );
   }
 
-  if (!userId) {
+  if (isAuthLoading) {
     return (
       <AppLayout>
         <div className="flex h-[50vh] items-center justify-center text-sm text-muted-foreground">
@@ -67,37 +134,31 @@ function Dashboard() {
     );
   }
 
-  const [summary, setSummary] = useState<any>(null);
-  const [chartData, setChartData] = useState<any[]>(defaultChartData);
-  const [apps, setApps] = useState<any[]>(defaultApps);
-  const [reminders, setReminders] = useState<any[]>([]);
+  if (!isSignedIn) {
+    return (
+      <AppLayout>
+        <div className="flex h-[50vh] items-center justify-center text-sm text-muted-foreground">
+          Redirecting to login...
+        </div>
+      </AppLayout>
+    );
+  }
 
-  useEffect(() => {
-
-    const fetchData = () => {
-      cortexClient.getActivitySummary(userId).then((sum) => {
-        setSummary(sum);
-      }).catch(console.error);
-
-      cortexClient.getProductivityAnalytics(userId).then((chart) => {
-        if (chart && chart.length > 0) setChartData(chart);
-      }).catch(console.error);
-
-      cortexClient.getAppsAnalytics(userId).then((activeApps) => {
-        if (activeApps && activeApps.length > 0) setApps(activeApps.slice(0, 4));
-      }).catch(console.error);
-
-      cortexClient.getReminders(userId).then((rems) => {
-        if (rems && rems.length > 0) {
-          setReminders(rems.filter(r => r.is_enabled).slice(0, 3));
-        }
-      }).catch(console.error);
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 10000); // refresh every 10s
-    return () => clearInterval(interval);
-  }, [userId]);
+  if (!userId) {
+    return (
+      <AppLayout>
+        <div className="flex h-[50vh] flex-col items-center justify-center gap-4 text-center">
+          <div className="text-lg font-medium text-destructive">Session Sync Failed</div>
+          <div className="max-w-md text-sm text-muted-foreground">
+            We were unable to synchronize your session with the local desktop daemon database.
+          </div>
+          <Button onClick={retrySync} className="mt-2">
+            Retry Sync
+          </Button>
+        </div>
+      </AppLayout>
+    );
+  }
 
   // Format focus duration
   const getFocusHoursString = () => {
@@ -112,13 +173,19 @@ function Dashboard() {
     if (action === "Start focus" || action === "Take break") {
       navigate({ to: "/focus" });
     } else if (action === "Coding mode") {
-      cortexClient.startFocusSession(userId, "Deep coding flow", 50 * 60).then(() => {
-        navigate({ to: "/focus" });
-      }).catch(console.error);
+      cortexClient
+        .startFocusSession(userId, "Deep coding flow", 50 * 60)
+        .then(() => {
+          navigate({ to: "/focus" });
+        })
+        .catch(console.error);
     } else if (action === "Study mode") {
-      cortexClient.startFocusSession(userId, "Focused reading and study", 50 * 60).then(() => {
-        navigate({ to: "/focus" });
-      }).catch(console.error);
+      cortexClient
+        .startFocusSession(userId, "Focused reading and study", 50 * 60)
+        .then(() => {
+          navigate({ to: "/focus" });
+        })
+        .catch(console.error);
     }
   };
 
@@ -138,16 +205,28 @@ function Dashboard() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
         <Card className="p-4 flex flex-col justify-between">
-          <Stat label="Productivity score" value={summary ? String(summary.score) : "0"} hint="vs 0 last week" />
+          <Stat
+            label="Productivity score"
+            value={summary ? String(summary.score) : "0"}
+            hint="vs 0 last week"
+          />
         </Card>
         <Card className="p-4 flex flex-col justify-between">
           <Stat label="Focus hours" value={getFocusHoursString()} hint="today" />
         </Card>
         <Card className="p-4 flex flex-col justify-between">
-          <Stat label="Distractions" value={summary?.today ? String(summary.today.distraction_count) : "0"} hint="contexts switched" />
+          <Stat
+            label="Distractions"
+            value={summary?.today ? String(summary.today.distraction_count) : "0"}
+            hint="contexts switched"
+          />
         </Card>
         <Card className="p-4 flex flex-col justify-between">
-          <Stat label="Sessions" value={summary?.today ? String(summary.today.sessions_count) : "0"} hint="completed today" />
+          <Stat
+            label="Sessions"
+            value={summary?.today ? String(summary.today.sessions_count) : "0"}
+            hint="completed today"
+          />
         </Card>
       </div>
 
@@ -156,7 +235,9 @@ function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <div className="text-sm font-medium">Weekly productivity</div>
-              <div className="text-xs text-muted-foreground">Focus vs distraction · last 14 days</div>
+              <div className="text-xs text-muted-foreground">
+                Focus vs distraction · last 14 days
+              </div>
             </div>
             <div className="flex gap-1 text-xs text-muted-foreground">
               <Legend dot="bg-foreground" label="Focus" />
@@ -173,8 +254,19 @@ function Dashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="day" stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
+                <XAxis
+                  dataKey="day"
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip
                   contentStyle={{
                     background: "rgba(20,20,22,0.95)",
@@ -183,7 +275,13 @@ function Dashboard() {
                     fontSize: 12,
                   }}
                 />
-                <Area type="monotone" dataKey="focus" stroke="white" strokeWidth={1.5} fill="url(#g1)" />
+                <Area
+                  type="monotone"
+                  dataKey="focus"
+                  stroke="white"
+                  strokeWidth={1.5}
+                  fill="url(#g1)"
+                />
                 <Area
                   type="monotone"
                   dataKey="distraction"
@@ -247,17 +345,23 @@ function Dashboard() {
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">live</span>
           </div>
           <div className="space-y-3">
-            {suggestions.map((s, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.08 }}
-                className="rounded-md border border-border bg-surface-1/60 p-3 text-sm leading-relaxed"
-              >
-                {s}
-              </motion.div>
-            ))}
+            {suggestions.length > 0 ? (
+              suggestions.map((s, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.08 }}
+                  className="rounded-md border border-border bg-surface-1/60 p-3 text-sm leading-relaxed"
+                >
+                  {s}
+                </motion.div>
+              ))
+            ) : (
+              <div className="text-xs text-muted-foreground py-8 text-center select-none">
+                Analyzing your workspace activity to generate personalized coaching insights...
+              </div>
+            )}
           </div>
         </Card>
 
@@ -267,22 +371,41 @@ function Dashboard() {
             <div className="text-xs text-muted-foreground">today</div>
           </div>
           <div className="space-y-3">
-            {[
-              { title: "Deep coding — auth refactor", dur: "1h 25m", tag: "Code" },
-              { title: "Reading: distributed systems", dur: "48m", tag: "Study" },
-              { title: "Sprint planning", dur: "32m", tag: "Plan" },
-              { title: "Algorithms practice", dur: "55m", tag: "Code" },
-            ].map((s, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
-                <div className="min-w-0">
-                  <div className="truncate">{s.title}</div>
-                  <div className="text-xs text-muted-foreground">{s.dur}</div>
-                </div>
-                <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                  {s.tag}
-                </span>
+            {recentSessions.length > 0 ? (
+              recentSessions.map((s, i) => {
+                const durationMinutes = Math.round(s.duration_seconds / 60);
+                const durStr =
+                  durationMinutes >= 60
+                    ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
+                    : `${durationMinutes}m`;
+
+                let tagStr = "Focus";
+                if (s.intention.toLowerCase().includes("code")) tagStr = "Code";
+                else if (
+                  s.intention.toLowerCase().includes("read") ||
+                  s.intention.toLowerCase().includes("study")
+                )
+                  tagStr = "Study";
+
+                return (
+                  <div key={s.id || i} className="flex items-center justify-between text-sm">
+                    <div className="min-w-0">
+                      <div className="truncate" title={s.intention}>
+                        {s.intention}
+                      </div>
+                      <div className="text-xs text-muted-foreground">{durStr}</div>
+                    </div>
+                    <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {tagStr}
+                    </span>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="text-xs text-muted-foreground py-10 text-center select-none">
+                No recent focus sessions completed today.
               </div>
-            ))}
+            )}
           </div>
         </Card>
       </div>
@@ -317,10 +440,9 @@ function Dashboard() {
                 <ReminderRow key={r.id} label={r.title} time={r.recurrence_interval} />
               ))
             ) : (
-              <>
-                <ReminderRow label="Hydrate" time="every 45m" />
-                <ReminderRow label="Posture check" time="every 30m" />
-              </>
+              <div className="text-xs text-muted-foreground py-4 text-center select-none">
+                No reminders registered in database. Syncing session to load defaults...
+              </div>
             )}
           </ul>
         </Card>
@@ -350,7 +472,7 @@ function PomodoroCard({ userId }: { userId: number }) {
   const [activeSession, setActiveSession] = useState<any>(null);
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(25 * 60);
-  
+
   // Dynamic total length based on active session configuration
   const total = activeSession?.target_duration_seconds || 25 * 60;
 
@@ -358,27 +480,30 @@ function PomodoroCard({ userId }: { userId: number }) {
     if (!userId) return;
 
     const checkSession = () => {
-      cortexClient.getActiveFocusSession(userId).then((sess) => {
-        if (sess) {
-          setActiveSession(sess);
-          setRunning(true);
-          const startTime = parseUTCDateTime(sess.started_at).getTime();
-          const elapsed = Math.floor((Date.now() - startTime) / 1000);
-          const target = sess.target_duration_seconds || 25 * 60;
-          const calculatedRemaining = Math.max(0, target - elapsed);
-          setSeconds((current) => {
-            // Only update if difference is significant to avoid countdown jumps due to clock drift
-            if (Math.abs(current - calculatedRemaining) > 3) {
-              return calculatedRemaining;
-            }
-            return current;
-          });
-        } else {
-          setActiveSession(null);
-          setRunning(false);
-          setSeconds(25 * 60);
-        }
-      }).catch(console.error);
+      cortexClient
+        .getActiveFocusSession(userId)
+        .then((sess) => {
+          if (sess) {
+            setActiveSession(sess);
+            setRunning(true);
+            const startTime = parseUTCDateTime(sess.started_at).getTime();
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const target = sess.target_duration_seconds || 25 * 60;
+            const calculatedRemaining = Math.max(0, target - elapsed);
+            setSeconds((current) => {
+              // Only update if difference is significant to avoid countdown jumps due to clock drift
+              if (Math.abs(current - calculatedRemaining) > 3) {
+                return calculatedRemaining;
+              }
+              return current;
+            });
+          } else {
+            setActiveSession(null);
+            setRunning(false);
+            setSeconds(25 * 60);
+          }
+        })
+        .catch(console.error);
     };
 
     checkSession();
@@ -392,17 +517,20 @@ function PomodoroCard({ userId }: { userId: number }) {
       setSeconds((s) => {
         if (s <= 1) {
           clearInterval(t);
-          cortexClient.endFocusSession(activeSession.id, true, 0).then(() => {
-            setActiveSession(null);
-            setRunning(false);
-            setSeconds(25 * 60);
-            if ((window as any).cortexAPI?.sendNotification) {
-              (window as any).cortexAPI.sendNotification(
-                "Focus Session Completed!",
-                "Your Pomodoro session has completed! Take a break."
-              );
-            }
-          }).catch(console.error);
+          cortexClient
+            .endFocusSession(activeSession.id, true, 0)
+            .then(() => {
+              setActiveSession(null);
+              setRunning(false);
+              setSeconds(25 * 60);
+              if ((window as any).cortexAPI?.sendNotification) {
+                (window as any).cortexAPI.sendNotification(
+                  "Focus Session Completed!",
+                  "Your Pomodoro session has completed! Take a break.",
+                );
+              }
+            })
+            .catch(console.error);
           return 0;
         }
         return s - 1;
@@ -413,32 +541,38 @@ function PomodoroCard({ userId }: { userId: number }) {
 
   const handleStart = () => {
     if (!userId) return;
-    cortexClient.startFocusSession(userId, "Dashboard Pomodoro sprint", 25 * 60).then((sess) => {
-      setActiveSession(sess);
-      setRunning(true);
-      setSeconds(25 * 60);
-      if ((window as any).cortexAPI?.sendNotification) {
-        (window as any).cortexAPI.sendNotification(
-          "Focus Session Started",
-          "Focus intention: \"Dashboard Pomodoro sprint\""
-        );
-      }
-    }).catch(console.error);
+    cortexClient
+      .startFocusSession(userId, "Dashboard Pomodoro sprint", 25 * 60)
+      .then((sess) => {
+        setActiveSession(sess);
+        setRunning(true);
+        setSeconds(25 * 60);
+        if ((window as any).cortexAPI?.sendNotification) {
+          (window as any).cortexAPI.sendNotification(
+            "Focus Session Started",
+            'Focus intention: "Dashboard Pomodoro sprint"',
+          );
+        }
+      })
+      .catch(console.error);
   };
 
   const handleStop = () => {
     if (activeSession) {
-      cortexClient.endFocusSession(activeSession.id, false, 0).then(() => {
-        setActiveSession(null);
-        setRunning(false);
-        setSeconds(25 * 60);
-        if ((window as any).cortexAPI?.sendNotification) {
-          (window as any).cortexAPI.sendNotification(
-            "Focus Session Stopped",
-            "Focus session has been stopped manually."
-          );
-        }
-      }).catch(console.error);
+      cortexClient
+        .endFocusSession(activeSession.id, false, 0)
+        .then(() => {
+          setActiveSession(null);
+          setRunning(false);
+          setSeconds(25 * 60);
+          if ((window as any).cortexAPI?.sendNotification) {
+            (window as any).cortexAPI.sendNotification(
+              "Focus Session Stopped",
+              "Focus session has been stopped manually.",
+            );
+          }
+        })
+        .catch(console.error);
     }
   };
 
@@ -450,11 +584,20 @@ function PomodoroCard({ userId }: { userId: number }) {
     <Card>
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-medium">Pomodoro</div>
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{running ? "Active" : "Ready"}</span>
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          {running ? "Active" : "Ready"}
+        </span>
       </div>
       <div className="relative mx-auto my-3 grid place-items-center">
         <svg viewBox="0 0 120 120" className="h-44 w-44 -rotate-90">
-          <circle cx="60" cy="60" r="54" stroke="rgba(255,255,255,0.08)" strokeWidth="6" fill="none" />
+          <circle
+            cx="60"
+            cy="60"
+            r="54"
+            stroke="rgba(255,255,255,0.08)"
+            strokeWidth="6"
+            fill="none"
+          />
           <circle
             cx="60"
             cy="60"
@@ -472,7 +615,9 @@ function PomodoroCard({ userId }: { userId: number }) {
             <div className="text-3xl font-semibold tracking-tight tabular-nums">
               {mm}:{ss}
             </div>
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">focus</div>
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground mt-1">
+              focus
+            </div>
           </div>
         </div>
       </div>
@@ -488,4 +633,3 @@ function PomodoroCard({ userId }: { userId: number }) {
     </Card>
   );
 }
-

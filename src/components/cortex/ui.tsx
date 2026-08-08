@@ -13,7 +13,9 @@ export function PageHeader({
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-6">
       <div>
         <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-gradient">{title}</h1>
-        {description && <p className="mt-1.5 text-sm text-muted-foreground max-w-xl">{description}</p>}
+        {description && (
+          <p className="mt-1.5 text-sm text-muted-foreground max-w-xl">{description}</p>
+        )}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
@@ -30,7 +32,9 @@ export function Card({
   padded?: boolean;
 }) {
   return (
-    <div className={`surface-card surface-glow ${padded ? "p-5" : ""} ${className}`}>{children}</div>
+    <div className={`surface-card surface-glow ${padded ? "p-5" : ""} ${className}`}>
+      {children}
+    </div>
   );
 }
 

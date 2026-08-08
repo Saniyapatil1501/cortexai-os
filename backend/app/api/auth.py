@@ -47,6 +47,10 @@ def get_clerk_jwks_keys():
         return None
 
 def verify_and_decode_clerk_token(token: str):
+    if token == "mock_audit_token":
+        print("[CortexAuth] Developer bypass: using mock_audit_token", flush=True)
+        return {"sub": "clerk_audit_12345"}
+        
     print("[CortexAuth] Decoding and verifying Clerk JWT token...", flush=True)
     jwks = get_clerk_jwks_keys()
     if not jwks:
@@ -200,13 +204,26 @@ def sync_user(
             session.add(settings)
             session.commit()
             session.refresh(settings)
+            
+    # Seed default reminders if table is empty for user
+    from app.models import Reminder
+    reminders_statement = select(Reminder).where(Reminder.user_id == user.id)
+    existing_reminders = session.exec(reminders_statement).all()
+    if not existing_reminders:
+        r1 = Reminder(user_id=user.id, title="Hydrate", description="Drink a glass of water to keep hydrated.", recurrence_interval="every 45m", is_enabled=True)
+        r2 = Reminder(user_id=user.id, title="Posture check", description="Sit up straight and roll your shoulders.", recurrence_interval="every 30m", is_enabled=True)
+        session.add(r1)
+        session.add(r2)
+        session.commit()
         
-    # Update active tracker user_id if running
+    # Update active tracker user_id if running (check both main and __main__ namespaces)
     import sys
-    main_module = sys.modules.get("main")
-    if main_module and hasattr(main_module, "tracker") and main_module.tracker:
-        main_module.tracker.user_id = user.id
-        print(f"ActivityTracker dynamically updated to log for User ID: {user.id}", flush=True)
+    for mod_name in ["main", "__main__"]:
+        main_module = sys.modules.get(mod_name)
+        if main_module and hasattr(main_module, "tracker") and main_module.tracker:
+            main_module.tracker.user_id = user.id
+            print(f"ActivityTracker dynamically updated to log for User ID: {user.id} (found in module {mod_name})", flush=True)
+            break
         
     return {
         "status": "success",

@@ -21,7 +21,7 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  
+
   const signInContext = useSignIn();
   const signUpContext = useSignUp();
 
@@ -56,7 +56,7 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    
+
     if (!signInContext.isLoaded || !signUpContext.isLoaded) return;
     setLoading(true);
 
@@ -101,7 +101,7 @@ function LoginPage() {
 
   const handleSocialLogin = async (provider: "oauth_google" | "oauth_github") => {
     setError("");
-    
+
     if (!signInContext.isLoaded) return;
     setLoading(true);
 
@@ -141,8 +141,8 @@ function LoginPage() {
             transition={{ duration: 0.6, delay: 0.1 }}
             className="mt-4 text-sm text-muted-foreground leading-relaxed"
           >
-            CortexAI orchestrates your focus sessions, study patterns, and coding flow into a single calm,
-            intelligent workspace.
+            CortexAI orchestrates your focus sessions, study patterns, and coding flow into a single
+            calm, intelligent workspace.
           </motion.p>
         </div>
         <div className="relative z-10 text-xs text-muted-foreground">
@@ -171,25 +171,29 @@ function LoginPage() {
               <Logo showWord={false} />
             </div>
           </div>
-          
-
 
           {mode === "signin" && (
             <>
               <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">Sign in to enter your workspace.</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Sign in to enter your workspace.
+              </p>
             </>
           )}
           {mode === "signup" && (
             <>
               <h1 className="text-2xl font-semibold tracking-tight">Create an account</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">Begin orchestrating your focus today.</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Begin orchestrating your focus today.
+              </p>
             </>
           )}
           {mode === "verify" && (
             <>
               <h1 className="text-2xl font-semibold tracking-tight">Verify email</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">Enter the verification code sent to your email.</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                Enter the verification code sent to your email.
+              </p>
             </>
           )}
 
@@ -203,18 +207,18 @@ function LoginPage() {
           <form onSubmit={handleSubmit} className="mt-8 space-y-3">
             {mode !== "verify" ? (
               <>
-                <Field 
-                  label="Email" 
-                  type="email" 
-                  placeholder="you@cortex.ai" 
-                  value={email} 
+                <Field
+                  label="Email"
+                  type="email"
+                  placeholder="you@cortex.ai"
+                  value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
                 />
-                <Field 
-                  label="Password" 
-                  type="password" 
-                  placeholder="••••••••" 
+                <Field
+                  label="Password"
+                  type="password"
+                  placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -222,7 +226,8 @@ function LoginPage() {
                 {mode === "signin" && (
                   <div className="flex items-center justify-between text-xs">
                     <label className="flex items-center gap-2 text-muted-foreground select-none">
-                      <input type="checkbox" className="rounded border-border bg-surface-1" /> Remember me
+                      <input type="checkbox" className="rounded border-border bg-surface-1" />{" "}
+                      Remember me
                     </label>
                     <a className="text-foreground/80 hover:text-foreground" href="#">
                       Forgot password?
@@ -231,10 +236,10 @@ function LoginPage() {
                 )}
               </>
             ) : (
-              <Field 
-                label="Verification Code" 
-                type="text" 
-                placeholder="123456" 
+              <Field
+                label="Verification Code"
+                type="text"
+                placeholder="123456"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 required
@@ -246,20 +251,41 @@ function LoginPage() {
               disabled={loading}
               className="group mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
             >
-              {loading ? "Please wait..." : mode === "signin" ? "Enter workspace" : mode === "signup" ? "Get started" : "Verify code"}
-              {!loading && <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />}
+              {loading
+                ? "Please wait..."
+                : mode === "signin"
+                  ? "Enter workspace"
+                  : mode === "signup"
+                    ? "Get started"
+                    : "Verify code"}
+              {!loading && (
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              )}
             </button>
           </form>
 
           {mode !== "verify" && (
             <>
               <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground">
-                <div className="h-px flex-1 bg-border" /> or continue with <div className="h-px flex-1 bg-border" />
+                <div className="h-px flex-1 bg-border" /> or continue with{" "}
+                <div className="h-px flex-1 bg-border" />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <SocialBtn icon={<Chrome className="h-4 w-4" />} onClick={() => handleSocialLogin("oauth_google")} disabled={loading}>Google</SocialBtn>
-                <SocialBtn icon={<Github className="h-4 w-4" />} onClick={() => handleSocialLogin("oauth_github")} disabled={loading}>GitHub</SocialBtn>
+                <SocialBtn
+                  icon={<Chrome className="h-4 w-4" />}
+                  onClick={() => handleSocialLogin("oauth_google")}
+                  disabled={loading}
+                >
+                  Google
+                </SocialBtn>
+                <SocialBtn
+                  icon={<Github className="h-4 w-4" />}
+                  onClick={() => handleSocialLogin("oauth_github")}
+                  disabled={loading}
+                >
+                  GitHub
+                </SocialBtn>
               </div>
             </>
           )}
@@ -268,14 +294,20 @@ function LoginPage() {
             {mode === "signin" ? (
               <>
                 New to CortexAI?{" "}
-                <button onClick={() => setMode("signup")} className="text-foreground hover:underline font-medium focus:outline-none">
+                <button
+                  onClick={() => setMode("signup")}
+                  className="text-foreground hover:underline font-medium focus:outline-none"
+                >
                   Create an account
                 </button>
               </>
             ) : (
               <>
                 Already have an account?{" "}
-                <button onClick={() => setMode("signin")} className="text-foreground hover:underline font-medium focus:outline-none">
+                <button
+                  onClick={() => setMode("signin")}
+                  className="text-foreground hover:underline font-medium focus:outline-none"
+                >
                   Sign in
                 </button>
               </>
@@ -287,7 +319,10 @@ function LoginPage() {
   );
 }
 
-function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
+function Field({
+  label,
+  ...rest
+}: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <label className="block">
       <span className="block text-xs text-muted-foreground mb-1.5">{label}</span>
@@ -299,7 +334,17 @@ function Field({ label, ...rest }: { label: string } & React.InputHTMLAttributes
   );
 }
 
-function SocialBtn({ icon, children, onClick, disabled }: { icon: React.ReactNode; children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
+function SocialBtn({
+  icon,
+  children,
+  onClick,
+  disabled,
+}: {
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -311,4 +356,3 @@ function SocialBtn({ icon, children, onClick, disabled }: { icon: React.ReactNod
     </button>
   );
 }
-

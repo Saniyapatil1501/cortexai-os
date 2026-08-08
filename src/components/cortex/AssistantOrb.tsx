@@ -37,13 +37,18 @@ export function AssistantOrb() {
             exit={{ opacity: 0, y: 8, scale: 0.96 }}
             transition={{ type: "spring", damping: 24, stiffness: 280 }}
             className="absolute bottom-16 right-0 w-72 rounded-xl border border-border bg-popover/90 backdrop-blur-xl p-3 shadow-2xl"
-            style={{ boxShadow: "0 20px 60px -20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04)" }}
+            style={{
+              boxShadow: "0 20px 60px -20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.04)",
+            }}
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2 text-sm font-medium">
                 <Sparkles className="h-3.5 w-3.5" /> Cortex presence
               </div>
-              <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <button
+                onClick={() => setOpen(false)}
+                className="text-muted-foreground hover:text-foreground"
+              >
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -51,19 +56,21 @@ export function AssistantOrb() {
               {state === "thinking"
                 ? "Analyzing your context…"
                 : state === "listening"
-                ? "Listening…"
-                : "Ready when you are."}
+                  ? "Listening…"
+                  : "Ready when you are."}
             </div>
             <div className="space-y-1">
-              {["Summarize current focus", "Plan the next 90 minutes", "Mute distractions"].map((t) => (
-                <button
-                  key={t}
-                  onClick={() => handleAction(t)}
-                  className="w-full rounded-md px-3 py-2 text-left text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground transition cursor-pointer"
-                >
-                  {t}
-                </button>
-              ))}
+              {["Summarize current focus", "Plan the next 90 minutes", "Mute distractions"].map(
+                (t) => (
+                  <button
+                    key={t}
+                    onClick={() => handleAction(t)}
+                    className="w-full rounded-md px-3 py-2 text-left text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground transition cursor-pointer"
+                  >
+                    {t}
+                  </button>
+                ),
+              )}
             </div>
             <div className="mt-2 flex gap-2 border-t border-border pt-2">
               <button
@@ -81,7 +88,9 @@ export function AssistantOrb() {
         onClick={() => setOpen((o) => !o)}
         aria-label="Cortex assistant"
         className="relative grid h-12 w-12 place-items-center rounded-full border border-border bg-gradient-to-b from-surface-2 to-surface-1"
-        style={{ boxShadow: "0 12px 40px -8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.06)" }}
+        style={{
+          boxShadow: "0 12px 40px -8px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.06)",
+        }}
       >
         {/* outer breathing rings */}
         <motion.span
@@ -101,8 +110,8 @@ export function AssistantOrb() {
             state === "thinking"
               ? { scale: [1, 1.15, 0.9, 1.1, 1], opacity: [1, 0.7, 1, 0.8, 1] }
               : state === "listening"
-              ? { scale: [1, 1.25, 1] }
-              : { scale: [1, 1.06, 1], opacity: [0.9, 1, 0.9] }
+                ? { scale: [1, 1.25, 1] }
+                : { scale: [1, 1.06, 1], opacity: [0.9, 1, 0.9] }
           }
           transition={{
             duration: state === "thinking" ? 1.4 : state === "listening" ? 0.8 : 3,

@@ -1,4 +1,13 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, Notification } from "electron";
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Tray,
+  Menu,
+  nativeImage,
+  globalShortcut,
+  Notification,
+} from "electron";
 import * as path from "path";
 import { exec, ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
@@ -16,35 +25,39 @@ function startBackend() {
   const isDev = !app.isPackaged;
   const scriptPath = path.join(__dirname, "../backend/main.py");
   const backendDir = path.join(__dirname, "../backend");
-  
+
   if (isDev) {
     console.log("Launching local FastAPI server in development mode...");
-    
+
     // Prioritize locating local virtual environment python binary
     let pythonCmd = "python";
     const venvPythonWindows = path.join(__dirname, "../backend/venv/Scripts/python.exe");
     const venvPythonUnix = path.join(__dirname, "../backend/venv/bin/python");
-    
+
     if (fs.existsSync(venvPythonWindows)) {
       pythonCmd = `"${venvPythonWindows}"`;
     } else if (fs.existsSync(venvPythonUnix)) {
       pythonCmd = `"${venvPythonUnix}"`;
     }
-    
+
     console.log(`Using Python command: ${pythonCmd}`);
     console.log(`Using Backend working directory: ${backendDir}`);
-    
+
     // Spawns the local FastAPI python script with backend folder as working directory
-    backendProcess = exec(`${pythonCmd} "${scriptPath}"`, { cwd: backendDir }, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`FastAPI daemon error: ${error.message}`);
-        return;
-      }
-      if (stderr) {
-        console.error(`FastAPI stderr: ${stderr}`);
-      }
-      console.log(`FastAPI stdout: ${stdout}`);
-    });
+    backendProcess = exec(
+      `${pythonCmd} "${scriptPath}"`,
+      { cwd: backendDir },
+      (error, stdout, stderr) => {
+        if (error) {
+          console.error(`FastAPI daemon error: ${error.message}`);
+          return;
+        }
+        if (stderr) {
+          console.error(`FastAPI stderr: ${stderr}`);
+        }
+        console.log(`FastAPI stdout: ${stdout}`);
+      },
+    );
   }
 }
 
@@ -103,6 +116,13 @@ function createWindow() {
     mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
+  mainWindow.once("ready-to-show", () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -112,7 +132,7 @@ function createTray() {
   // Create simple native 16x16 B&W image or empty box
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
-  
+
   const contextMenu = Menu.buildFromTemplate([
     { label: "Show CortexAI", click: () => mainWindow?.show() },
     { label: "Hide to Tray", click: () => mainWindow?.hide() },
