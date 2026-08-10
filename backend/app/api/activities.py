@@ -373,3 +373,15 @@ def get_activity_suggestions(
         suggestions.append("Great job starting your Cortex journey. Keep focusing and track your progress daily!")
         
     return suggestions[:3]
+
+@router.post("/mock_active_window")
+def mock_active_window(app_name: str, window_title: str):
+    import sys
+    for mod in list(sys.modules.values()):
+        if mod and hasattr(mod, "tracker") and getattr(mod, "tracker") is not None:
+            tracker_obj = getattr(mod, "tracker")
+            tracker_obj._mock_app = app_name
+            tracker_obj._mock_title = window_title
+            print(f"[CortexMock] Foreground window mocked to: {app_name} | {window_title}", flush=True)
+            return {"status": "success", "mocked_app": app_name, "mocked_title": window_title}
+    return {"status": "failed", "message": "Tracker not found"}

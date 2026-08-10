@@ -47,6 +47,8 @@ class ActivityTracker(Thread):
                 return "chrome.exe", "FastAPI Documentation - Google Chrome"
             else:
                 return "spotify.exe", "Ambient Lo-Fi Focus Beats"
+        if getattr(self, "_mock_app", None):
+            return self._mock_app, self._mock_title
             
         try:
             hwnd = win32gui.GetForegroundWindow()
