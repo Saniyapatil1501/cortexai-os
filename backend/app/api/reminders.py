@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlmodel import Session, select
 from app.database import get_session
 from app.models import Reminder
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
+from app.api.auth import verify_user_access
 
 router = APIRouter()
 
@@ -21,7 +22,10 @@ class ReminderUpdate(BaseModel):
     recurrence_interval: Optional[str] = None
 
 @router.post("/")
-def create_reminder(data: ReminderCreate, session: Session = Depends(get_session)):
+def create_reminder(data: ReminderCreate, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
+    # Enforce user authorization check
+    verify_user_access(data.user_id, authorization, session)
+    
     rem = Reminder(
         user_id=data.user_id,
         title=data.title,
@@ -35,15 +39,18 @@ def create_reminder(data: ReminderCreate, session: Session = Depends(get_session
     return rem
 
 @router.get("/{user_id}", response_model=List[Reminder])
-def get_reminders(user_id: int, session: Session = Depends(get_session)):
+def get_reminders(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     statement = select(Reminder).where(Reminder.user_id == user_id)
     return session.exec(statement).all()
 
 @router.put("/{reminder_id}")
-def update_reminder(reminder_id: int, data: ReminderUpdate, session: Session = Depends(get_session)):
+def update_reminder(reminder_id: int, data: ReminderUpdate, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
     rem = session.get(Reminder, reminder_id)
     if not rem:
         raise HTTPException(status_code=404, detail="Reminder not found")
+        
+    # Enforce user authorization check on reminder owner
+    verify_user_access(rem.user_id, authorization, session)
         
     if data.is_enabled is not None:
         rem.is_enabled = data.is_enabled

@@ -4,12 +4,16 @@ import { Card, PageHeader, Button } from "@/components/cortex/ui";
 import { Droplets, Activity, BookOpen, Code2, Bell, Plus } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cortexClient, ReminderItem } from "@/lib/api";
+import { useCortexAuth } from "@/hooks/useCortexAuth";
 
 export const Route = createFileRoute("/reminders")({
   head: () => ({
     meta: [
       { title: "Reminders — CortexAI" },
-      { name: "description", content: "Gentle, intelligent reminders that protect your body and your focus." },
+      {
+        name: "description",
+        content: "Gentle, intelligent reminders that protect your body and your focus.",
+      },
     ],
   }),
   component: RemindersPage,
@@ -18,39 +22,85 @@ export const Route = createFileRoute("/reminders")({
 function getReminderIcon(title: string) {
   const t = title.toLowerCase();
   if (t.includes("hydra") || t.includes("water") || t.includes("drink")) return Droplets;
-  if (t.includes("posture") || t.includes("sit") || t.includes("shoulder") || t.includes("back")) return Activity;
+  if (t.includes("posture") || t.includes("sit") || t.includes("shoulder") || t.includes("back"))
+    return Activity;
   if (t.includes("study") || t.includes("reflect") || t.includes("read")) return BookOpen;
-  if (t.includes("code") || t.includes("screen") || t.includes("pr") || t.includes("dev")) return Code2;
+  if (t.includes("code") || t.includes("screen") || t.includes("pr") || t.includes("dev"))
+    return Code2;
   return Bell;
 }
 
 function RemindersPage() {
+  const { user } = useCortexAuth();
+  const userId = user?.user_id;
+
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
 
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalType, setModalType] = useState<"create" | "configure">("create");
+  const [selectedReminder, setSelectedReminder] = useState<ReminderItem | null>(null);
+  const [title, setTitle] = useState("");
+  const [desc, setDesc] = useState("");
+  const [interval, setIntervalVal] = useState("");
+
   useEffect(() => {
-    cortexClient.getReminders(1).then((data) => {
-      setReminders(data);
-    }).catch(console.error);
-  }, []);
+    if (!userId) return;
+    cortexClient
+      .getReminders(userId)
+      .then((data) => {
+        setReminders(data);
+      })
+      .catch(console.error);
+  }, [userId]);
 
   const handleToggle = (id: number, currentVal: boolean) => {
-    cortexClient.updateReminder(id, { is_enabled: !currentVal }).then((updated) => {
-      setReminders((prev) => prev.map((x) => (x.id === id ? updated : x)));
-    }).catch(console.error);
+    cortexClient
+      .updateReminder(id, { is_enabled: !currentVal })
+      .then((updated) => {
+        setReminders((prev) => prev.map((x) => (x.id === id ? updated : x)));
+      })
+      .catch(console.error);
   };
 
-  const handleNewReminder = async () => {
-    const title = window.prompt("Enter reminder title (e.g. Stretch):");
-    if (!title) return;
-    const desc = window.prompt("Enter description (e.g. Realign your back):") || "";
-    const interval = window.prompt("Enter recurrence (e.g. every 30m, at 3:30 PM):");
-    if (!interval) return;
+  const handleOpenCreateModal = () => {
+    setModalType("create");
+    setTitle("");
+    setDesc("");
+    setIntervalVal("");
+    setModalOpen(true);
+  };
 
-    try {
-      const newRem = await cortexClient.createReminder(1, title, desc, interval);
-      setReminders((prev) => [...prev, newRem]);
-    } catch (e) {
-      console.error("Error creating reminder:", e);
+  const handleOpenConfigureModal = (reminder: ReminderItem) => {
+    setModalType("configure");
+    setSelectedReminder(reminder);
+    setIntervalVal(reminder.recurrence_interval);
+    setModalOpen(true);
+  };
+
+  const handleSaveReminder = async () => {
+    if (!userId) return;
+
+    if (modalType === "create") {
+      if (!title.trim() || !interval.trim()) return;
+      try {
+        const newRem = await cortexClient.createReminder(userId, title, desc, interval);
+        setReminders((prev) => [...prev, newRem]);
+        setModalOpen(false);
+      } catch (e) {
+        console.error("Error creating reminder:", e);
+      }
+    } else if (modalType === "configure" && selectedReminder) {
+      if (!interval.trim()) return;
+      try {
+        const updated = await cortexClient.updateReminder(selectedReminder.id, {
+          recurrence_interval: interval,
+        });
+        setReminders((prev) => prev.map((x) => (x.id === selectedReminder.id ? updated : x)));
+        setModalOpen(false);
+      } catch (e) {
+        console.error("Error updating reminder:", e);
+      }
     }
   };
 
@@ -60,7 +110,7 @@ function RemindersPage() {
         title="Reminders"
         description="Quiet nudges to keep your body and attention aligned."
         actions={
-          <Button onClick={handleNewReminder}>
+          <Button onClick={handleOpenCreateModal}>
             <Plus className="h-4 w-4" /> New reminder
           </Button>
         }
@@ -86,16 +136,9 @@ function RemindersPage() {
               </div>
               <div className="mt-4 flex items-center justify-between text-xs">
                 <span className="text-muted-foreground">{it.recurrence_interval}</span>
-                <button 
-                  onClick={() => {
-                    const newInterval = window.prompt("Enter new recurrence interval (e.g. every 45m):", it.recurrence_interval);
-                    if (newInterval) {
-                      cortexClient.updateReminder(it.id, { recurrence_interval: newInterval }).then((updated) => {
-                        setReminders((prev) => prev.map((x) => (x.id === it.id ? updated : x)));
-                      }).catch(console.error);
-                    }
-                  }}
-                  className="text-foreground/80 hover:text-foreground"
+                <button
+                  onClick={() => handleOpenConfigureModal(it)}
+                  className="text-foreground/80 hover:text-foreground cursor-pointer"
                 >
                   Configure
                 </button>
@@ -104,6 +147,78 @@ function RemindersPage() {
           );
         })}
       </div>
+
+      {/* Premium custom modal overlay */}
+      {modalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 cursor-pointer"
+          onClick={() => setModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-lg border border-border bg-surface-1/95 p-6 shadow-2xl cursor-default"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold tracking-tight text-foreground mb-4">
+              {modalType === "create" ? "New Reminder" : "Configure Recurrence"}
+            </h3>
+
+            <div className="space-y-4">
+              {modalType === "create" && (
+                <>
+                  <label className="block">
+                    <span className="block text-xs text-muted-foreground mb-1.5">Title</span>
+                    <input
+                      placeholder="e.g. Stretch or Hydrate"
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      className="w-full rounded-md border border-border bg-surface-2 px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-foreground/40"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-muted-foreground mb-1.5">Description</span>
+                    <input
+                      placeholder="e.g. Drink a glass of water"
+                      value={desc}
+                      onChange={(e) => setDesc(e.target.value)}
+                      className="w-full rounded-md border border-border bg-surface-2 px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-foreground/40"
+                    />
+                  </label>
+                </>
+              )}
+
+              <label className="block">
+                <span className="block text-xs text-muted-foreground mb-1.5">
+                  Recurrence Interval
+                </span>
+                <input
+                  placeholder="e.g. every 30m or at 3:30 PM"
+                  value={interval}
+                  onChange={(e) => setIntervalVal(e.target.value)}
+                  className="w-full rounded-md border border-border bg-surface-2 px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-foreground/40"
+                />
+              </label>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2 text-sm">
+              <button
+                onClick={() => setModalOpen(false)}
+                className="rounded-md border border-border bg-surface-2 px-4 py-2 hover:bg-surface-3 transition cursor-pointer text-foreground"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveReminder}
+                disabled={
+                  modalType === "create" ? !title.trim() || !interval.trim() : !interval.trim()
+                }
+                className="rounded-md bg-foreground text-background font-medium px-4 py-2 hover:opacity-90 transition disabled:opacity-50 cursor-pointer"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 }
@@ -112,7 +227,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   return (
     <button
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full border transition ${
+      className={`relative h-6 w-11 rounded-full border transition cursor-pointer ${
         checked ? "bg-foreground border-foreground" : "bg-surface-2 border-border"
       }`}
       aria-pressed={checked}

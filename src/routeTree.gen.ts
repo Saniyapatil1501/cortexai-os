@@ -9,8 +9,10 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SsoCallbackRouteImport } from './routes/sso-callback'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RemindersRouteImport } from './routes/reminders'
+import { Route as MaterialsRouteImport } from './routes/materials'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as FocusRouteImport } from './routes/focus'
 import { Route as DashboardRouteImport } from './routes/dashboard'
@@ -18,6 +20,11 @@ import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
 
+const SsoCallbackRoute = SsoCallbackRouteImport.update({
+  id: '/sso-callback',
+  path: '/sso-callback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -26,6 +33,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const RemindersRoute = RemindersRouteImport.update({
   id: '/reminders',
   path: '/reminders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MaterialsRoute = MaterialsRouteImport.update({
+  id: '/materials',
+  path: '/materials',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -66,8 +78,10 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
   '/login': typeof LoginRoute
+  '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
+  '/sso-callback': typeof SsoCallbackRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -76,8 +90,10 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
   '/login': typeof LoginRoute
+  '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
+  '/sso-callback': typeof SsoCallbackRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -87,8 +103,10 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
   '/login': typeof LoginRoute
+  '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
   '/settings': typeof SettingsRoute
+  '/sso-callback': typeof SsoCallbackRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -99,8 +117,10 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/focus'
     | '/login'
+    | '/materials'
     | '/reminders'
     | '/settings'
+    | '/sso-callback'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -109,8 +129,10 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/focus'
     | '/login'
+    | '/materials'
     | '/reminders'
     | '/settings'
+    | '/sso-callback'
   id:
     | '__root__'
     | '/'
@@ -119,8 +141,10 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/focus'
     | '/login'
+    | '/materials'
     | '/reminders'
     | '/settings'
+    | '/sso-callback'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -130,12 +154,21 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   FocusRoute: typeof FocusRoute
   LoginRoute: typeof LoginRoute
+  MaterialsRoute: typeof MaterialsRoute
   RemindersRoute: typeof RemindersRoute
   SettingsRoute: typeof SettingsRoute
+  SsoCallbackRoute: typeof SsoCallbackRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/sso-callback': {
+      id: '/sso-callback'
+      path: '/sso-callback'
+      fullPath: '/sso-callback'
+      preLoaderRoute: typeof SsoCallbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -148,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/reminders'
       fullPath: '/reminders'
       preLoaderRoute: typeof RemindersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/materials': {
+      id: '/materials'
+      path: '/materials'
+      fullPath: '/materials'
+      preLoaderRoute: typeof MaterialsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -202,8 +242,10 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   FocusRoute: FocusRoute,
   LoginRoute: LoginRoute,
+  MaterialsRoute: MaterialsRoute,
   RemindersRoute: RemindersRoute,
   SettingsRoute: SettingsRoute,
+  SsoCallbackRoute: SsoCallbackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

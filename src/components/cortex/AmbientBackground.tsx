@@ -4,7 +4,13 @@ import { useEffect, useRef } from "react";
  * Lightweight canvas-based ambient particle field.
  * Calm, monochrome, premium — no WebGL/Three needed.
  */
-export function AmbientBackground({ density = 60, className = "" }: { density?: number; className?: string }) {
+export function AmbientBackground({
+  density = 60,
+  className = "",
+}: {
+  density?: number;
+  className?: string;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -14,7 +20,9 @@ export function AmbientBackground({ density = 60, className = "" }: { density?: 
     if (!ctx) return;
 
     let raf = 0;
-    let w = 0, h = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+    let w = 0,
+      h = 0,
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     type P = { x: number; y: number; vx: number; vy: number; r: number; a: number };
     const particles: P[] = [];
@@ -87,7 +95,11 @@ export function AmbientBackground({ density = 60, className = "" }: { density?: 
           <span
             key={i}
             className="absolute h-1.5 w-1.5 rounded-full bg-foreground/40"
-            style={{ top: p.top, left: p.left, animation: `cortexPulse 4.5s ease-in-out ${p.delay} infinite` }}
+            style={{
+              top: p.top,
+              left: p.left,
+              animation: `cortexPulse 4.5s ease-in-out ${p.delay} infinite`,
+            }}
           />
         ))}
       </div>

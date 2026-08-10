@@ -1,9 +1,28 @@
+import os
+from dotenv import load_dotenv
+
+# Load env variables from .env file in the backend folder
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
+
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        integrations=[FastApiIntegration()],
+        traces_sample_rate=1.0,
+    )
+
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
+
 # We will initialize routers in separate files
-from app.api import auth, sessions, activities, assistant, reminders
+from app.api import auth, sessions, activities, assistant, reminders, documents, rag, vision
 from app.database import create_db_and_tables
 
 app = FastAPI(
@@ -11,6 +30,15 @@ app = FastAPI(
     description="Local service tracking focus, windows, reminders, and LLM completions.",
     version="1.0.0"
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # Enable CORS for React frontend (Vite/TanStack Start Dev server port)
 app.add_middleware(
@@ -27,41 +55,24 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["Focus Session
 app.include_router(activities.router, prefix="/api/activities", tags=["Activity Monitor"])
 app.include_router(assistant.router, prefix="/api/assistant", tags=["AI Assistant"])
 app.include_router(reminders.router, prefix="/api/reminders", tags=["Reminders"])
+app.include_router(documents.router, prefix="/api/documents", tags=["Study Materials"])
+app.include_router(rag.router, prefix="/api/rag", tags=["Semantic Search"])
+app.include_router(vision.router, prefix="/api/vision", tags=["Computer Vision"])
+
+tracker = None
 
 @app.on_event("startup")
 def on_startup():
-    from app.models import User
+    global tracker
     from app.services.tracker import ActivityTracker
-    from sqlmodel import Session, select
     from app.database import engine
 
     create_db_and_tables()
     
-    # Pre-create default workspace profile
-    with Session(engine) as session:
-        statement = select(User).where(User.email == "alex@cortex.ai")
-        user = session.exec(statement).first()
-        if not user:
-            user = User(email="alex@cortex.ai")
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-        default_id = user.id
-        
-        # Pre-create default reminders if they don't exist
-        from app.models import Reminder
-        statement_rem = select(Reminder).where(Reminder.user_id == default_id)
-        reminders = session.exec(statement_rem).all()
-        if not reminders:
-            session.add(Reminder(user_id=default_id, title="Hydrate", description="Drink a glass of water", recurrence_interval="every 45m"))
-            session.add(Reminder(user_id=default_id, title="Posture check", description="Sit up straight and roll your shoulders", recurrence_interval="every 30m"))
-            session.add(Reminder(user_id=default_id, title="Review PR #482", description="Check github pull request updates", recurrence_interval="at 3:30 PM"))
-            session.commit()
-        
-    # Launch tracker daemon on background thread
-    tracker = ActivityTracker(engine=engine, user_id=default_id)
+    # Launch tracker daemon on background thread with no initial user
+    tracker = ActivityTracker(engine=engine, user_id=None)
     tracker.start()
-    print("CortexAI DB initialized and ActivityTracker daemon started.")
+    print("CortexAI DB initialized and ActivityTracker daemon started (waiting for user session sync).")
 
 @app.get("/")
 def read_root():

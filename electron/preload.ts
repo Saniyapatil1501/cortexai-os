@@ -8,4 +8,7 @@ contextBridge.exposeInMainWorld("cortexAPI", {
   onFocusTrigger: (callback: () => void) => {
     ipcRenderer.on("focus:trigger", () => callback());
   },
+  minimizeWindow: () => ipcRenderer.send("window:minimize"),
+  maximizeWindow: () => ipcRenderer.send("window:maximize"),
+  closeWindow: () => ipcRenderer.send("window:close"),
 });

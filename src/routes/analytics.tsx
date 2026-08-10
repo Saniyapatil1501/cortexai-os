@@ -19,7 +19,10 @@ export const Route = createFileRoute("/analytics")({
   head: () => ({
     meta: [
       { title: "Analytics — CortexAI" },
-      { name: "description", content: "Deep insights into your focus, study, and coding patterns." },
+      {
+        name: "description",
+        content: "Deep insights into your focus, study, and coding patterns.",
+      },
     ],
   }),
   component: AnalyticsPage,
@@ -27,22 +30,15 @@ export const Route = createFileRoute("/analytics")({
 
 import { useEffect, useState } from "react";
 import { cortexClient } from "@/lib/api";
+import { useCortexAuth } from "@/hooks/useCortexAuth";
 
-const defaultTrend = Array.from({ length: 14 }, (_, i) => ({
-  day: `D${i + 1}`,
-  focus: 2 + Math.sin(i / 2) * 1.5,
-  distraction: 1.0
-}));
+const defaultTrend: any[] = [];
 
-const defaultHours = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => ({
-  d,
-  code: 1 + Math.random() * 4,
-  study: 0.5 + Math.random() * 3,
-}));
+const defaultHours: any[] = [];
 
-const defaultDistr = Array.from({ length: 12 }, (_, i) => ({ d: i + 1, v: Math.round(2 + Math.random() * 9) }));
+const defaultDistr: any[] = [];
 
-const defaultHeatmap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => Math.random()));
+const defaultHeatmap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0.0));
 
 const tooltipStyle = {
   background: "rgba(20,20,22,0.95)",
@@ -52,6 +48,9 @@ const tooltipStyle = {
 };
 
 function AnalyticsPage() {
+  const { user } = useCortexAuth();
+  const userId = user?.user_id;
+
   const [summary, setSummary] = useState<any>(null);
   const [trend, setTrend] = useState<any[]>(defaultTrend);
   const [hours, setHours] = useState<any[]>(defaultHours);
@@ -60,24 +59,28 @@ function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!userId) return;
+    setLoading(true);
     Promise.all([
-      cortexClient.getActivitySummary(1),
-      cortexClient.getProductivityAnalytics(1),
-      cortexClient.getWeeklyHoursAnalytics(1),
-      cortexClient.getDistractionsAnalytics(1),
-      cortexClient.getHeatmapAnalytics(1)
-    ]).then(([sum, trendData, hoursData, distrData, heatmapData]) => {
-      setSummary(sum);
-      if (trendData && trendData.length > 0) setTrend(trendData);
-      if (hoursData && hoursData.length > 0) setHours(hoursData);
-      if (distrData && distrData.length > 0) setDistr(distrData);
-      if (heatmapData && heatmapData.length > 0) setHeatmap(heatmapData);
-      setLoading(false);
-    }).catch((err) => {
-      console.error("Error loading analytics data:", err);
-      setLoading(false);
-    });
-  }, []);
+      cortexClient.getActivitySummary(userId),
+      cortexClient.getProductivityAnalytics(userId),
+      cortexClient.getWeeklyHoursAnalytics(userId),
+      cortexClient.getDistractionsAnalytics(userId),
+      cortexClient.getHeatmapAnalytics(userId),
+    ])
+      .then(([sum, trendData, hoursData, distrData, heatmapData]) => {
+        setSummary(sum);
+        if (trendData && trendData.length > 0) setTrend(trendData);
+        if (hoursData && hoursData.length > 0) setHours(hoursData);
+        if (distrData && distrData.length > 0) setDistr(distrData);
+        if (heatmapData && heatmapData.length > 0) setHeatmap(heatmapData);
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.error("Error loading analytics data:", err);
+        setLoading(false);
+      });
+  }, [userId]);
 
   const getTotalFocusHours = () => {
     if (!summary?.total_seconds) return "0h";
@@ -91,14 +94,14 @@ function AnalyticsPage() {
     const codeSec = summary.categories?.code || 0;
     const studySec = summary.categories?.study || 0;
     const totalSec = summary.total_seconds || 1;
-    const ratio = Math.round((codeSec + studySec) / totalSec * 100);
+    const ratio = Math.round(((codeSec + studySec) / totalSec) * 100);
     return `${ratio}%`;
   };
 
   const getDistractionsCount = () => {
     if (!summary) return "0";
-    // Count distraction logs
-    return String(summary.categories?.distraction ? Math.round(summary.categories.distraction / 10) : 0);
+    // Return the actual today's distraction count or category count
+    return String(summary.today?.distraction_count || 0);
   };
 
   return (
@@ -106,10 +109,25 @@ function AnalyticsPage() {
       <PageHeader title="Analytics" description="How you actually spend your attention." />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat label="Total focus" value={getTotalFocusHours()} hint="this week" trend={{ value: "+12%", up: true }} />
+        <Stat
+          label="Total focus"
+          value={getTotalFocusHours()}
+          hint="this week"
+          trend={summary?.total_seconds > 0 ? { value: "+12%", up: true } : undefined}
+        />
         <Stat label="Avg session" value="50m" hint="streak builder" />
-        <Stat label="Deep work ratio" value={getDeepWorkRatio()} hint="of total work time" trend={{ value: "+8%", up: true }} />
-        <Stat label="Distractions" value={getDistractionsCount()} hint="this week" trend={{ value: "-21%", up: true }} />
+        <Stat
+          label="Deep work ratio"
+          value={getDeepWorkRatio()}
+          hint="of total work time"
+          trend={summary?.total_seconds > 0 ? { value: "+8%", up: true } : undefined}
+        />
+        <Stat
+          label="Distractions"
+          value={getDistractionsCount()}
+          hint="today"
+          trend={summary?.total_seconds > 0 ? { value: "-21%", up: true } : undefined}
+        />
       </div>
 
       <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -128,10 +146,27 @@ function AnalyticsPage() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="day" stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
+                <XAxis
+                  dataKey="day"
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="focus" stroke="white" strokeWidth={1.5} fill="url(#ga)" />
+                <Area
+                  type="monotone"
+                  dataKey="focus"
+                  stroke="white"
+                  strokeWidth={1.5}
+                  fill="url(#ga)"
+                />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -146,11 +181,27 @@ function AnalyticsPage() {
             <ResponsiveContainer>
               <BarChart data={hours} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="d" stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
+                <XAxis
+                  dataKey="d"
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
                 <Bar dataKey="code" stackId="a" fill="white" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="study" stackId="a" fill="rgba(255,255,255,0.35)" radius={[2, 2, 0, 0]} />
+                <Bar
+                  dataKey="study"
+                  stackId="a"
+                  fill="rgba(255,255,255,0.35)"
+                  radius={[2, 2, 0, 0]}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -167,8 +218,19 @@ function AnalyticsPage() {
             <ResponsiveContainer>
               <LineChart data={distr} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                 <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis dataKey="d" stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
-                <YAxis stroke="rgba(255,255,255,0.35)" fontSize={11} tickLine={false} axisLine={false} />
+                <XAxis
+                  dataKey="d"
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="rgba(255,255,255,0.35)"
+                  fontSize={11}
+                  tickLine={false}
+                  axisLine={false}
+                />
                 <Tooltip contentStyle={tooltipStyle} />
                 <Line type="monotone" dataKey="v" stroke="white" strokeWidth={1.5} dot={false} />
               </LineChart>
@@ -194,13 +256,17 @@ function AnalyticsPage() {
           <div className="overflow-x-auto">
             <div className="grid grid-rows-7 gap-1 min-w-[640px]">
               {heatmap.map((row, ri) => (
-                <div key={ri} className="grid grid-cols-24 gap-1" style={{ gridTemplateColumns: "repeat(24, minmax(0,1fr))" }}>
+                <div
+                  key={ri}
+                  className="grid grid-cols-24 gap-1"
+                  style={{ gridTemplateColumns: "repeat(24, minmax(0,1fr))" }}
+                >
                   {row.map((v, ci) => (
                     <div
                       key={ci}
                       className="h-5 rounded-sm"
                       style={{ background: `rgba(255,255,255,${0.05 + v * 0.75})` }}
-                      title={`${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][ri]} · ${ci}:00`}
+                      title={`${["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][ri]} · ${ci}:00`}
                     />
                   ))}
                 </div>

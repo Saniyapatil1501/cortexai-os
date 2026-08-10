@@ -2,8 +2,10 @@ import time
 import psutil
 from threading import Thread
 from datetime import datetime
-from sqlmodel import Session
-from app.models import ActivityLog
+from sqlmodel import Session, select
+from app.models import ActivityLog, FocusSession
+from app.services.classifier import context_classifier
+from app.services.timer import timer_state_machine
 
 # Graceful import for non-Windows platforms
 try:
@@ -45,6 +47,8 @@ class ActivityTracker(Thread):
                 return "chrome.exe", "FastAPI Documentation - Google Chrome"
             else:
                 return "spotify.exe", "Ambient Lo-Fi Focus Beats"
+        if getattr(self, "_mock_app", None):
+            return self._mock_app, self._mock_title
             
         try:
             hwnd = win32gui.GetForegroundWindow()
@@ -62,34 +66,6 @@ class ActivityTracker(Thread):
         except Exception:
             return "Unknown", "Background Work"
 
-    def classify_activity(self, app_name: str, window_title: str):
-        if app_name == "Idle":
-            return "idle", 0
-            
-        # Premium heuristic classification
-        app_lower = app_name.lower()
-        title_lower = window_title.lower() if window_title else ""
-        
-        coding_execs = ["code.exe", "windowsterminal.exe", "cmd.exe", "powershell.exe", "idea64.exe"]
-        distraction_execs = ["slack.exe", "discord.exe", "spotify.exe", "steam.exe"]
-        browser_execs = ["chrome.exe", "firefox.exe", "msedge.exe", "browser.exe"]
-        
-        if any(c in app_lower for c in coding_execs):
-            return "code", 2 # highly productive
-        elif any(d in app_lower for d in distraction_execs):
-            return "distraction", -2 # highly distracting
-        elif any(b in app_lower for b in browser_execs):
-            # Check context inside browser title
-            distr_keywords = ["youtube", "facebook", "twitter", "reddit", "netflix", "instagram"]
-            if any(k in title_lower for k in distr_keywords):
-                return "distraction", -2
-            study_keywords = ["docs", "github", "stack overflow", "google search", "notion", "medium"]
-            if any(k in title_lower for k in study_keywords):
-                return "study", 1
-            return "study", 0 # neutral browsing
-        else:
-            return "unclassified", 0
-
     def run(self):
         last_app, last_title = None, None
         start_time = time.time()
@@ -98,6 +74,8 @@ class ActivityTracker(Thread):
         while self.running:
             try:
                 time.sleep(1) # check interval: 1 second
+                if not self.user_id:
+                    continue
                 
                 # Check for idle state
                 idle_sec = self.get_idle_seconds()
@@ -106,21 +84,79 @@ class ActivityTracker(Thread):
                 else:
                     app_name, window_title = self.get_active_window_details()
                 
+                # Update Timer State Machine if Focus Session is active
+                with Session(self.engine) as session:
+                    stmt = select(FocusSession).where(
+                        FocusSession.user_id == self.user_id,
+                        FocusSession.completed == False
+                    )
+                    active_session = session.exec(stmt).first()
+                    
+                    if active_session:
+                        classification = context_classifier.classify(
+                            session=session,
+                            user_id=self.user_id,
+                            app_name=app_name,
+                            window_title=window_title,
+                            study_goal=active_session.intention
+                        )
+                        timer_state_machine.update(
+                            session=session,
+                            focus_session=active_session,
+                            classification=classification,
+                            app_name=app_name,
+                            window_title=window_title
+                        )
+                
+                # Save standard ActivityLog if context changed and debounce matches
                 if app_name != last_app or window_title != last_title:
                     duration = int(time.time() - start_time)
-                    if last_app and duration >= 2: # Only log if active for more than 2 seconds
-                        self.save_activity(last_app, last_title, duration)
+                    is_app_change = (app_name != last_app)
+                    required_duration = 5 if is_app_change else 15
                     
-                    last_app, last_title = app_name, window_title
-                    start_time = time.time()
+                    if last_app and duration >= required_duration:
+                        self.save_activity(last_app, last_title, duration)
+                        last_app, last_title = app_name, window_title
+                        start_time = time.time()
+                    elif not last_app:
+                        last_app, last_title = app_name, window_title
+                        start_time = time.time()
+                    else:
+                        if is_app_change:
+                            last_app, last_title = app_name, window_title
+                            start_time = time.time()
             except Exception as e:
                 print(f"Tracking daemon warning: {str(e)}")
                 time.sleep(2)
 
     def save_activity(self, app_name: str, window_title: str, duration: int):
-        category, score = self.classify_activity(app_name, window_title)
-        
+        if not self.user_id:
+            print("ActivityTracker: No active user authenticated. Skipping log.")
+            return
+            
         with Session(self.engine) as session:
+            stmt = select(FocusSession).where(
+                FocusSession.user_id == self.user_id,
+                FocusSession.completed == False
+            )
+            active_sess = session.exec(stmt).first()
+            study_goal = active_sess.intention if active_sess else ""
+            
+            classification = context_classifier.classify(
+                session=session,
+                user_id=self.user_id,
+                app_name=app_name,
+                window_title=window_title,
+                study_goal=study_goal
+            )
+            
+            category = classification["category"]
+            score = 0
+            if category == "study":
+                score = 1
+            elif category == "distraction":
+                score = -2
+                
             log = ActivityLog(
                 user_id=self.user_id,
                 app_name=app_name,
@@ -133,3 +169,4 @@ class ActivityTracker(Thread):
             session.add(log)
             session.commit()
             print(f"Logged: {app_name} | {window_title} | {duration}s | Category: {category}")
+

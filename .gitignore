@@ -3,6 +3,8 @@ node_modules/
 /dist/
 /dist-ssr/
 /dist-electron/
+build/
+/build/
 /.output/
 /.vinxi/
 /.tanstack/
@@ -11,6 +13,7 @@ node_modules/
 # Python / FastAPI Virtual Environments & Caches
 venv/
 .venv/
+backend/venv/
 env/
 ENV/
 __pycache__/
@@ -25,16 +28,17 @@ __pycache__/
 *.db
 *.db-journal
 *.sqlite
+*.sqlite3
+*-journal
+*.sqlite-journal
+*.sqlite3-journal
 cortexai.db
 cortexai.db-journal
 
 # Environment Variables & Secrets
 .env
 .env.local
-.env.development
-.env.production
-.env.development.local
-.env.production.local
+.env.*
 .dev.vars
 
 # Cloudflare / Wrangler Caches
@@ -54,3 +58,14 @@ Thumbs.db
 
 # IDE & Generation Artifacts
 .lovable/
+
+# Generated Runtime Files & Local Vector Indexes
+evaluation_results/
+backend/evaluation_results/
+data/vector_store/
+backend/data/vector_store/
+backend/scratch/
+*.log
+temp_*.png
+screenshot_*.png
+
