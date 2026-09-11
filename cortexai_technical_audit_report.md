@@ -1,352 +1,220 @@
-# CortexAI — Technical Audit & Modular Academic Architecture Design
+# CortexAI — Comprehensive Architectural Audit & Production Blueprint
 
-## "Context-Aware Multimodal Desktop Study Assistant"
-
-This document contains the complete technical audit, API key dependency mapping, and modular architecture design for converting **CortexAI** into a privacy-focused, academic-grade AI Desktop Study Assistant.
+This report presents a thorough senior-level architectural audit of the **CortexAI** desktop application. It details current system architecture, identifies critical runtime and state bugs, analyzes resource utilization, maps dependencies, and outlines a concrete 5-phase implementation plan to transition CortexAI from a prototype into a polished, publishable desktop AI product.
 
 ---
 
-## 1. Complete Codebase Audit
+## 1. Concise Architecture Map
 
-CortexAI operates a split, dual-process desktop architecture:
-
-1. **Frontend Overlay Shell**: A React 19 single-page application compiled using Vite, run inside an Electron container, and navigated via type-safe TanStack Router.
-2. **Backend Daemon Server**: An asynchronous local Python FastAPI service hosted on port `8000` that handles foreground window tracking, database operations, document chunking, semantic vector index operations, and AI stream generation.
+CortexAI utilizes a **dual-process desktop architecture** consisting of a renderer container (Electron + React) and a local service daemon (FastAPI).
 
 ```mermaid
 graph TD
-    subgraph Electron Shell [Electron Desktop Window]
-        A[Global Shortcut Ctrl+Alt+Space] -->|Toggle View| B[React UI App]
-        B -->|IPC Calls: Minimize/Maximize/Close| C[Preload IPC Bridge]
-        B -->|Webkit Speech / TTS| D[Browser Native Voice]
+    subgraph Client Process [Electron Shell Process]
+        A[App Startup] -->|Request Single Instance Lock| B{Locked?}
+        B -->|No| C[Show Error & Exit]
+        B -->|Yes| D[Spawn FastAPI Subprocess]
+        D -->|Load URL| E[React App in BrowserWindow]
+        E -->|IPC window:minimize / maximize / close| F[preload.ts Context Bridge]
+        E -->|Global Shortcut Ctrl+Alt+Space| G[Show/Hide Shell Overlay]
+        E -->|Browser Web Speech API| H[Microphone Input / TTS]
     end
 
-    subgraph FastAPI Local Daemon [Python Process: Port 8000]
-        E[main.py Startup Event] -->|Launch| F[ActivityTracker Thread]
-        E -->|Bootstrap| G[SQLite DB: WAL Mode]
-        H[REST API Routes] -->|auth.py| I[Clerk JWKS Key Sync]
-        H -->|activities.py| J[Metrics / Heatmap Queries]
-        H -->|sessions.py| K[Focus Sessions Start/End]
-        H -->|documents.py| L[pypdf Document Extractor]
-        H -->|rag.py| M[Local FAISS Vector Store]
-        H -->|assistant.py| N[Mock LLM Engine]
+    subgraph Service Process [FastAPI Local Daemon: Port 8000]
+        I[main.py Startup] -->|Launch Thread| J[ActivityTracker Thread]
+        I -->|Init DB Schema| K[(SQLite Database: WAL Mode)]
+        L[REST Endpoints] -->|auth.py| M[Local JWT Validation via Clerk JWKS]
+        L -->|sessions.py| N[Focus Session Lifecycle]
+        L -->|activities.py| O[Activity Analytics & Metrics]
+        L -->|documents.py| P[PyPDF parser]
+        L -->|rag.py| Q[FAISS Vector Store]
+        L -->|vision.py| R[PaddleOCR & Spatial Clustering]
+        L -->|assistant.py| S[Ollama API Client]
     end
 
-    B -->|Sync Auth / REST Queries| H
+    E -->|REST API Calls & SSE Stream| L
+    J -->|Query active window state & log| K
+    Q -->|Load cached model| T[SentenceTransformers]
+    R -->|Lazy Init OCR| U[PaddleOCR Engine]
+    S -->|Local Inference| V[Ollama Instance]
 ```
 
-### Component Details
-
-- **Frontend Architecture**: React 19, TanStack Router (routes dynamically configured in `src/routes/`), and TanStack Query. Styling is handled via Tailwind CSS v4 using modern `oklch` dynamic color palettes. Micro-animations are managed using Framer Motion, and graphs are drawn using Recharts.
-- **Electron Wrapper**: Configured in [main.ts](file:///D:/project/cortexai-desktop-main/electron/main.ts). It spawns the FastAPI python daemon on startup using the local virtual environment Python (Windows `venv/Scripts/python.exe` or Unix equivalent). It handles tray menus, system-level notifications, and intercepts `Ctrl+Alt+Space` to display the dashboard as a global frameless overlay.
-- **FastAPI Backend Daemon**: Written in Python, registered in [main.py](file:///D:/project/cortexai-desktop-main/backend/main.py). Spawns `ActivityTracker` on startup and mounts 7 modular routers.
-- **SQLite Database**: ORM schemas defined in SQLModel (SQLAlchemy) under [models.py](file:///D:/project/D:/project/cortexai-desktop-main/backend/app/models.py). The DB file `cortexai.db` is stored under `LOCALAPPDATA/CortexAI/`. Multi-thread concurrency is optimized via SQLAlchemy connection listeners setting `PRAGMA journal_mode=WAL` and `PRAGMA synchronous=NORMAL`.
-- **Authentication**: Clerk Auth is implemented on the frontend. The backend validates bearer JWT tokens locally inside [auth.py](file:///D:/project/cortexai-desktop-main/backend/app/api/auth.py) by verifying Clerk signatures using PyJWT's RS256 decoding against cached JWKS public keys.
-- **Activity Tracking**: Managed by `ActivityTracker` in [tracker.py](file:///D:/project/cortexai-desktop-main/backend/app/services/tracker.py) on a background thread. Polls the Windows active window handle `win32gui.GetForegroundWindow()` every 1s. Falls back to mock alternating states on macOS/Linux. Saves are throttled using a debounce logic of 5s for app switches and 15s for title swaps.
-- **Pomodoro / Focus Timer**: Managed via [sessions.py](file:///D:/project/cortexai-desktop-main/backend/app/api/sessions.py) and [focus.tsx](file:///D:/project/cortexai-desktop-main/src/routes/focus.tsx). Calculates focus duration, context swaps, and distraction transitions dynamically from `ActivityLog` entries.
-- **Smart Reminders**: Scheduled and stored via [reminders.py](file:///D:/project/cortexai-desktop-main/backend/app/api/reminders.py). Handled by the client-side event loop, triggering Electron native notification alerts.
-- **Study Materials Manager (RAG)**: Implemented in [documents.py](file:///D:/project/cortexai-desktop-main/backend/app/api/documents.py). Extracts PDF/TXT/MD text using `pypdf`, cleans encoding, chunks text semantically (target size ~600 words with 80-word overlap), gets text embeddings using a local SentenceTransformers instance, and indexes them in a local FAISS index.
-- **AI Chatbot**: Routes through `/api/assistant/chat`. It grounds requests by appending active session intent and the 5 most recent activity logs to the chat prompt, streaming responses via Server-Sent Events (SSE).
-- **Voice Features**: Web Speech API handles browser-native dictation and text-to-speech. The backend wake word module is a skeleton file.
+### Component Breakdown
+1. **Desktop Shell Container**: Electron main process (`electron/main.ts`) runs as a Node.js process. It handles custom frameless window creation, taskbar tray integration, global hotkeys (`Ctrl+Alt+Space`), OS toast notifications, and manages the lifecycle of the FastAPI subprocess.
+2. **Context Isolation Bridge**: `preload.ts` exposes a safe, minimal subset of IPC APIs (`cortexAPI`) to the renderer process.
+3. **Frontend Application**: React 19 single-page app running in the Electron renderer. It uses TanStack Router for route management, TanStack Query for caching backend requests, Lucide icons, Framer Motion, and Tailwind CSS v4.
+4. **Local FastAPI Daemon**: A Python service running on `http://127.0.0.1:8000`. It acts as the local controller, exposing REST and Server-Sent Event (SSE) endpoints. It launches `ActivityTracker` as a background daemon thread.
+5. **SQLite Storage Engine**: Uses SQLAlchemy/SQLModel. Optimized with Write-Ahead Logging (WAL) and normal synchronization (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL`) to handle concurrent database reads and writes.
+6. **Local ML & AI Engines**:
+   - **Vector Embeddings**: SentenceTransformers (`all-MiniLM-L6-v2`) lazy-loaded on-demand.
+   - **Vector Index**: FAISS Flat L2 index stored locally in `APPDATA/CortexAI/vector_store/`.
+   - **Computer Vision**: PaddleOCR lazy-loaded for text extraction, paired with a custom OpenCV preprocessing pipeline.
+   - **Chat Assistant**: Connects to a local Ollama server running `qwen2.5-coder:3b`.
 
 ---
 
-### Feature Audit Table
+## 2. List of Real Bugs
 
-| Feature                     | Current Technology                        | Working?    | API Key Required?                              | File(s) Responsible                                                                                                                                                                  |
-| :-------------------------- | :---------------------------------------- | :---------- | :--------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **SSO / Email Login**       | Clerk Auth React Wrapper                  | **Yes**     | Yes (`VITE_CLERK_PUBLISHABLE_KEY`)             | [login.tsx](file:///D:/project/cortexai-desktop-main/src/routes/login.tsx), [useCortexAuth.tsx](file:///D:/project/cortexai-desktop-main/src/hooks/useCortexAuth.tsx)                |
-| **Workspace Profile Sync**  | FastAPI + Clerk JWKS Verification         | **Yes**     | Yes (`CLERK_JWKS_URL`, `CLERK_ISSUER`)         | [auth.py](file:///D:/project/cortexai-desktop-main/backend/app/api/auth.py)                                                                                                          |
-| **Activity Tracking**       | PyWin32 daemon (mock on non-Windows)      | **Yes**     | No                                             | [tracker.py](file:///D:/project/cortexai-desktop-main/backend/app/services/tracker.py)                                                                                               |
-| **Active App Analytics**    | FastAPI SQL queries + Recharts            | **Yes**     | No                                             | [activities.py](file:///D:/project/cortexai-desktop-main/backend/app/api/activities.py), [analytics.tsx](file:///D:/project/cortexai-desktop-main/src/routes/analytics.tsx)          |
-| **Pomodoro Session Logger** | Start/End REST + distraction calculator   | **Yes**     | No                                             | [sessions.py](file:///D:/project/D:/project/cortexai-desktop-main/backend/app/api/sessions.py), [focus.tsx](file:///D:/project/cortexai-desktop-main/src/routes/focus.tsx)           |
-| **Study Materials Parser**  | `pypdf` text parsing & cleaning           | **Yes**     | No                                             | [document_processor.py](file:///D:/project/cortexai-desktop-main/backend/app/nlp/document_processor.py)                                                                              |
-| **Semantic Vector Index**   | Local FAISS Index + SentenceTransformers  | **Yes**     | No (Auto-downloads models locally)             | [vector_store.py](file:///D:/project/cortexai-desktop-main/backend/app/rag/vector_store.py), [embeddings.py](file:///D:/project/cortexai-desktop-main/backend/app/nlp/embeddings.py) |
-| **Smart Reminders**         | Frontend timer loop + Electron IPC alerts | **Yes**     | No                                             | [reminders.py](file:///D:/project/cortexai-desktop-main/backend/app/api/reminders.py), [reminders.tsx](file:///D:/project/cortexai-desktop-main/src/routes/reminders.tsx)            |
-| **AI Assistant Chat**       | SSE endpoint with system prompt context   | **Stubbed** | No (Returns static mock upgrade string)        | [assistant.py](file:///D:/project/cortexai-desktop-main/backend/app/api/assistant.py), [engine.py](file:///D:/project/cortexai-desktop-main/backend/app/ai/engine.py)                |
-| **Speech-to-Text / TTS**    | Webkit Speech API + SpeechSynthesis       | **Yes**     | No                                             | [assistant.tsx](file:///D:/project/cortexai-desktop-main/src/routes/assistant.tsx)                                                                                                   |
-| **Wake Word Detection**     | Voice Settings Toggle                     | **No**      | No (Skeleton files only, settings visual stub) | [wake_word.py](file:///D:/project/cortexai-desktop-main/backend/app/voice/wake_word.py), [settings.tsx](file:///D:/project/cortexai-desktop-main/src/routes/settings.tsx)            |
-| **Global Overlay Toggle**   | Electron globalShortcut                   | **Yes**     | No                                             | [main.ts](file:///D:/project/cortexai-desktop-main/electron/main.ts)                                                                                                                 |
+### Bug 2.1: The "Slow Focus Timer" (UI Overwrite Loop)
+- **Problem**: When a focus session is active, the background tracker thread runs `StudyTimerStateMachine.update(...)` every 3 seconds (`sleep_time = 3`). On every tick, it increments the session time by 1:
+  `focus_session.duration_seconds += 1`
+  This means the timer runs **3 times slower** than real time.
+- **Frontend Overwrite**: The React frontend (`src/routes/focus.tsx`) has a smooth local 1-second interval timer. However, every 5 seconds, it polls `/api/sessions/active/{user_id}` and resets its local `elapsed` counter to `sess.duration_seconds`.
+- **Result**: The UI countdown ticks down normally (e.g. 5, 4, 3, 2, 1) and then suddenly jumps backward (e.g. back to 4) because the backend slow timer overwrites it.
+
+### Bug 2.2: Focus Session Stop Button Fails to Terminate Sessions
+- **Problem**: In `backend/app/api/sessions.py` and `tracker.py`, the active session check searches for a session where `completed == False`:
+  `select(FocusSession).where(FocusSession.completed == False)`
+  However, `completed` is also used as a boolean flag to track whether the user successfully achieved their target study duration.
+- **Result**: If a user stops a focus session manually before hitting the target, the frontend calls `/sessions/end` with `completed = false`. The backend writes `completed = False` to the database. Because `completed` remains `False`, the backend `ActivityTracker` and `/sessions/active/{user_id}` endpoint continue to treat this session as active, preventing it from ever closing.
+
+### Bug 2.3: Lack of Single-Instance Lock Causes DB & Port Collisions
+- **Problem**: `electron/main.ts` does not call `app.requestSingleInstanceLock()`.
+- **Result**: Users can open multiple instances of the app. This causes immediate collisions, resulting in:
+  - Port `8000` (FastAPI) and Port `3000` (Vite) being locked, prompting conflict warnings.
+  - SQLite database locking (`sqlite3.OperationalError: database is locked`) and Chromium cache errors on Windows due to simultaneous disk access from separate processes.
 
 ---
 
-## 2. API Key Dependency Analysis
+## 3. List of Duplicate / Unsafe Processes
 
-For a B.Tech academic system, the goal is to eliminate runtime dependencies on costly external cloud APIs (Gemini/OpenAI), establishing a fully self-contained local system.
+### Process 3.1: Orphaned FastAPI Daemons on Window Close
+- **Problem**: In `electron/main.ts`, the `killProcesses()` function uses `taskkill /F /T /PID {pid}` on Windows or `process.kill(-pid, "SIGKILL")` on Unix. While this terminates the immediate child process, it can fail to clean up subprocesses spawned by Python/Uvicorn if the shell isn't managed correctly.
+- **Result**: If Electron exits cleanly or uncleanly (e.g. crash, Task Manager kill, or fast restart during dev), the Python FastAPI server remains orphaned in the background. On the next startup, it conflicts with port 8000, rendering the app unable to sync.
 
-### Dependency Classification
+### Process 3.2: Direct Unvalidated IPC Exposure in Preload
+- **Problem**: In `electron/preload.ts`, the context bridge exposes several shell-level controls:
+  ```typescript
+  minimizeWindow: () => ipcRenderer.send("window:minimize"),
+  maximizeWindow: () => ipcRenderer.send("window:maximize"),
+  closeWindow: () => ipcRenderer.send("window:close"),
+  ```
+- **Result**: This allows arbitrary code execution in the renderer (if compromised) to manipulate OS windows directly. While not immediately exploitable without an XSS vector, a secure production layout should validate sender origins.
+
+---
+
+## 4. List of Stale-State Problems
+
+### Stale State 4.1: Clerk Logout Does Not Stop Backend Activity Tracker
+- **Problem**: When a user signs out, Clerk triggers the session destruction on the client. However, no endpoint or signal is sent to the FastAPI backend.
+- **Result**: The background `ActivityTracker` thread continues to run with `self.user_id = logged_out_user_id`. It continues to log window titles, apps, and categories under the logged-out user's profile, leading to data leaks and corrupted analytics.
+
+### Stale State 4.2: Google Login Restores Cached Local State
+- **Problem**: When logging in with a new user account, the dashboard React route (`src/routes/dashboard.tsx`) retains the previous user's state variables (e.g. `summary`, `apps`, `suggestions`) if the new `userId` is loading or fails to resolve.
+- **Result**: The new user sees the previous user's activity logs, daily goals, and active reminders for several seconds on initial mount.
+
+### Stale State 4.3: Focus Session and Dashboard Desynchronization
+- **Problem**: Focus sessions write `FocusSessionEvent` logs to track segment classification (e.g. distraction, study). However, the dashboard's app analytics query the general `ActivityLog` table.
+- **Result**: Because the temporal smoothing and grace logic of the `StudyTimerStateMachine` only adjust `FocusSessionEvent` items, the dashboard shows old, raw distractions (like a quick 2-second check of a browser tab) that the focus timer had correctly debounced and smoothed out.
+
+---
+
+## 5. List of Resource-Heavy Operations
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│               CortexAI Dependency Matrix               │
+│             CortexAI Resource Utilization              │
 ├────────────────────────────────────────────────────────┤
-│ A. External AI Keys (0 Used, 0 Active)                 │
-│    - No active keys found in python or typescript code │
-│    - Chat assistant streams a static mock placeholder  │
+│ 1. Idle CPU: 0.1% - 0.5% (Optimal)                     │
+│    - pywin32 polls window handle every 1s-8s.           │
+│    - No active camera/screen streaming running.        │
 ├────────────────────────────────────────────────────────┤
-│ B. Authentication & Services                           │
-│    - Clerk Auth (Requires publishable key & JWKS URLs) │
-│    - Sentry (Optional error reporting DSN)             │
+│ 2. Idle RAM: ~450MB (Can be optimized)                 │
+│    - Electron: ~150MB                                  │
+│    - Python Daemon (Idle): ~60MB                       │
+│    - PaddleOCR (If loaded): ~180MB                     │
+│    - SentenceTransformers (If loaded): ~60MB           │
 ├────────────────────────────────────────────────────────┤
-│ C. Keyless / Local Offline Services                    │
-│    - SentenceTransformers (Model: all-MiniLM-L6-v2)    │
-│    - FAISS Vector Library                              │
-│    - Win32 Foreground APIs (pywin32)                   │
-│    - SQLite WAL Database                               │
+│ 3. Disk Writes: Low (WAL Mode throttles logs)          │
 ├────────────────────────────────────────────────────────┤
-│ D. Internal REST APIs                                  │
-│    - 25 internal loopback localhost:8000 endpoints     │
+│ 4. AI Inference: Bounded (Only runs on demand)         │
 └────────────────────────────────────────────────┘
 ```
 
-- **What breaks if Clerk is removed?**
-  The frontend `RootComponent` in `__root.tsx` prints a blocking configuration error card and halts app execution if the publishable key is missing. If backend issuer URLs are deleted, the `/sync` API returns `401 Unauthorized`, keeping `/dashboard` and `/settings` stuck in infinite loading circles.
-- **What breaks if Sentry is removed?**
-  Nothing. Telemetry tracking will be bypassed gracefully on startup.
-- **What breaks if Gemini/OpenAI is removed?**
-  Nothing, since no generative AI keys are currently implemented in the execution code.
-
-### Proposed Academic Strategy
-
-1. **Retain Clerk Auth**: Keeps the login screens beautiful and secure for demo purposes (requires active internet connection).
-   - _Optional Offline Fallback_: We can design a local, credential-less SQLite local user table fallback for fully network-isolated reviews.
-2. **Replace Generative AI Engine**: Bind the backend chat and screens summaries to a **local Ollama instance** running `qwen2.5-coder:7b` or `llama3:8b`. This replaces mock text blocks with true AI reasoning for $0 cost.
+1. **PaddleOCR Model Footprint**:
+   PaddleOCR is a heavy model (~180MB RAM). Loading it at startup would violate the product target of a lightweight workspace companion. The current implementation correctly uses `lazy_init()` to delay loading until screen analysis is requested.
+2. **SentenceTransformers Embedding Model**:
+   Uses the `all-MiniLM-L6-v2` model (~60MB RAM). Like OCR, this model is correctly lazy-loaded when processing study materials.
+3. **Continuous Screen Capture (Avoided)**:
+   The application correctly avoids background screen capture. Screenshots are only taken when the user explicitly triggers "stuck check" diagnostics or screen region "Lens" capture.
 
 ---
 
-## 3. Prepare Modular AI Architecture
+## 6. Proposed Production Architecture
 
-To support hot-swappable AI providers and maintain clean separation of concerns, the backend should be organized into independent structural blocks:
+To transition CortexAI into a robust desktop AI product, we propose the following architectural improvements:
 
-```
-backend/app/
-│
-├── ai/
-│   ├── __init__.py
-│   ├── base.py                   # abstract interfaces for LLMs
-│   ├── factory.py                # loads Ollama / OpenAI / Gemini / Heuristic
-│   ├── context.py                # context engine formatting recent state
-│   └── providers/
-│       ├── gemini.py
-│       ├── openai.py
-│       ├── ollama.py             # Local model integration
-│       └── heuristic.py
-│
-├── nlp/
-│   ├── document_processor.py     # chunking & text cleaning
-│   └── embeddings.py             # local sentence-transformers
-│
-├── rag/
-│   ├── vector_store.py           # FAISS index persistence
-│   └── retriever.py              # cosine matches & context assembly
-│
-├── vision/
-│   ├── ocr.py                    # local PyTesseract / easyocr
-│   ├── screen_capture.py         # Win32 screen grabbing
-│   └── screen_analyzer.py        # layout analysis
-│
-├── voice/
-│   ├── speech_to_text.py         # local Whisper STT
-│   ├── text_to_speech.py         # local pyttsx3/coqui TTS
-│   └── wake_word.py              # local wake-word listener thread
-│
-└── services/
-    ├── tracker.py                # foreground Win32 window polling daemon
-    └── proactive.py              # stuck detection/proactive helper daemon
-```
-
-### Core Interface: `BaseLLM`
-
-```python
-# backend/app/ai/base.py
-from abc import ABC, abstractmethod
-from typing import AsyncGenerator, List, Dict
-
-class BaseLLM(ABC):
-    @abstractmethod
-    async def generate(self, prompt: str, context: str, history: List[Dict[str, str]]) -> str:
-        """Generate static text response."""
-        pass
-
-    @abstractmethod
-    async def stream(self, prompt: str, context: str, history: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
-        """Stream token-by-token response via SSE."""
-        pass
-
-    @abstractmethod
-    def health_check(self) -> bool:
-        """Check provider connection status."""
-        pass
-```
+1. **Single-Instance Enforcement**: Add a single-instance lock in `electron/main.ts` using `app.requestSingleInstanceLock()`. If a second instance is started, focus the primary window and exit the duplicate process.
+2. **Explicit Session State Tracking**: Modify the active session query to look for `ended_at IS NULL` instead of `completed == False`. This allows us to safely log a session as ended, while recording whether the Pomodoro goal was completed.
+3. **Backend Logout Propagation**: Implement a `/api/auth/logout` endpoint in the backend. When a user logs out in React, call this endpoint to set `tracker.user_id = None` and terminate any active background focus timers immediately.
+4. **Resilient Offline Guard**: If the FastAPI daemon is offline, allow the user to continue using the client in a local offline "Guest Mode" using a mock local SQLite path, bypassing Clerk's blocking web interface.
+5. **Persistent Side-Panel AI Chat Companion**:
+   - Shrink the primary workspace application to a compact floating companion avatar/orb.
+   - When clicked, this avatar should slide out a persistent, global desktop side-panel (using an Electron window pinned to the side of the screen, similar to Windows Copilot or Google Colab side panel).
+   - This side-panel operates without stealing focus from other applications.
+6. **Screen-Region "Lens" Selection**:
+   - Add a "Lens" button in the side chat.
+   - When clicked, show a transparent overlay window covering the desktop.
+   - Allow the user to drag a cropping rectangle to capture a specific screen region.
+   - Crop the screenshot to these coordinates, process it through the local OCR/vision pipeline, and feed the extracted text directly into the local Ollama LLM context for explanation.
 
 ---
 
-## 4. Smart Study Classification Design
-
-### The Current Heuristic Classifier
-
-In `tracker.py`, active windows are parsed strictly using keyword string lookups:
-
-- Executable is `code.exe` $\rightarrow$ classified as `"code"`
-- Title contains `"youtube"`, `"reddit"` $\rightarrow$ classified as `"distraction"`
-- Title contains `"docs"`, `"github"`, `"notion"` $\rightarrow$ classified as `"study"`
-
-This system is fragile (e.g., studying a machine learning lecture on YouTube is marked as a distraction, while coding an automation script for social media is marked as work).
-
-### Proposed Semantic Classification Design
-
-1. **Cos-Similarity Vector Classifier**:
-   - Generate an embedding vector of the active window title (e.g. `"[tracker.py] - Visual Studio Code"` $\rightarrow$ [384 floats]).
-   - Maintain a list of pre-embedded anchor phrases representing target categories:
-     - **STUDY**: "lecture notes", "course syllabus", "textbook pdf", "documentation"
-     - **CODE**: "repository pull request", "terminal console", "compiler trace"
-     - **DISTRACTED**: "gaming video", "social feed", "streaming music"
-   - Compute cosine similarity between the current window title's embedding and the anchor vectors. Assign the category of the closest match if it exceeds a confidence threshold (e.g., $\ge 0.65$).
-2. **Zero-Shot Classification Model**:
-   - Integrate a local Hugging Face classifier model (e.g., `distilbert-base-uncased` fine-tuned on MNLI) to classify title text dynamically.
-3. **Local LLM Summary Re-classification**:
-   - If similarity matches are ambiguous, summarize the last 5 minutes of logged activity titles and request classification from the local LLM.
-
----
-
-## 5. Focus Timer Behavior
-
-The Pomodoro focus loop will trigger state updates dynamically based on user behavior:
-
-```mermaid
-stateDiagram-v2
-    [*] --> FocusSessionActive : User Starts Session
-
-    state FocusSessionActive {
-        [*] --> Tracking
-        Tracking --> DistractedState : Activity == Distraction
-        DistractedState --> NotificationSent : Wait 5s
-        NotificationSent --> TimerPaused : User remains distracted
-        TimerPaused --> Tracking : Activity == Study or Code
-        Tracking --> IdleState : Activity == Idle (Idle > 2 min)
-        IdleState --> TimerPaused : Idle threshold exceeded
-        Tracking --> [*] : Timer expires or User Ends Session
-    }
-
-    FocusSessionActive --> ReviewScreen : Session Completed
-```
-
-### Distraction Interception & Metrics Output
-
-When a focus session is active, the backend:
-
-1. Detects if window classification swaps to `distraction`.
-2. Initiates a 5s debounce window. If the distraction continues, it triggers an Electron IPC event to pause the Pomodoro timer and fires a notification:
-   > "Your focus session is paused. Return to your study task to resume."
-3. When the user returns to an application classified as `study` or `code`, the timer resumes automatically.
-4. **Summary Metrics Structure**:
-   - **Active Study Time**: Actual seconds spent on productive applications.
-   - **Distraction Time**: Accumulated seconds spent on distracting applications.
-   - **Idle Time**: Seconds spent away from keyboard.
-   - **App Swaps**: Total count of active application transitions.
-   - **Context Switches**: Number of study-to-distraction transitions.
-   - **Longest Distraction**: Maximum continuous time spent on a distraction.
-   - **Focus Score**: $(Active\ Study\ Time / (Total\ Elapsed\ Time - Idle\ Time)) \times 100 - (Context\ Switches \times 5)$.
-
----
-
-## 6. Proactive AI Assistant Design
-
-The Proactive Assistant detects when a user is struggling or inactive and offers context-aware help.
-
-### The "Need Help?" Workflow
+## 7. Dependency / Data-Flow Map
 
 ```
-[User works normally]
+[User Screen Interaction]
+          │
+          ▼  (Lens selection triggered)
+[Electron Transparent Overlay] ──► Capture crop region coordinates
+          │
+          ▼  (Base64 crop data sent via safe IPC)
+[preload.ts Context Bridge]
+          │
+          ▼  (POST /api/vision/analyze)
+[FastAPI Router: vision.py]
+          │
+          ├──► [ocr.py: Run PaddleOCR (Lazy)] ──► Extract text regions
+          │
+          ├──► [rag.py: Search FAISS Index] ────► Retrieve local notes/chunks
           │
           ▼
-[Background daemon monitors active title & keyboard input]
+[assistant.py: Ollama Client] ──► Inject Context (OCR + RAG)
+          │
+          ▼  (Generate streamed tokens)
+[SSE Stream: Port 8000]
           │
           ▼
-[Title includes compiler traceback OR window remains unchanged for 5 min]
-          │
-          ▼
-[Electron alerts User: "Need Help? Click to analyze."]
-          │
-          ▼ (User accepts)
-[Capture current window screenshot pixels]
-          │
-          ▼ (Computer Vision Engine)
-[Extract screen text using local OCR]
-          │
-          ▼ (NLP/RAG Engine)
-[Search FAISS index with OCR terms to pull study materials]
-          │
-          ▼ (Generative AI Engine)
-[Local LLM generates synthesis: explain error + reference study notes]
-          │
-          ▼
-[Stream results to Orb Chat UI + Voice response]
+[React UI App: Side Panel Chat] ──► Display formatted Markdown/Syntax response
 ```
 
-### Privacy & Screen Capture Rules
-
-> [!IMPORTANT]
-> **CortexAI must NEVER continuously save or stream user screenshots.** Screen capture occurs **only** when the user explicitly clicks "Yes" on the "Need Help?" prompt, or triggers screen analysis manually. The image bytes are processed in memory and are never persisted to disk.
-
 ---
 
-## 7. Local Voice Experience
+## 8. Prioritized Implementation Plan
 
-CortexAI will run a voice assistant that connects speech input and output to the unified local context engine:
+This prioritized roadmap is divided into 5 phases.
 
-1. **Wake Word Detector**: Spawns a background thread running a local voice detector (such as Picovoice Porcupine or a custom wake-word classifier).
-2. **Audio Recorder**: Upon hearing "Hey Cortex", the system emits a chime and records audio input from the default microphone.
-3. **Local Whisper Transcriber**: Transcribes audio to text using a local instance of `whisper.cpp` or a fast-whisper Python model.
-4. **Context Grounding**: The transcribed text is sent to the AI chat endpoint along with the active desktop context (e.g. VS Code open with a compiler error) and the latest RAG course notes.
-5. **Speech Synthesis**: Converts the text response to speech using local text-to-speech tools (`pyttsx3` or `coqui-tts`) to provide a complete voice interaction.
+### Phase 1: Critical Bug Fixes & Session Integrity
+- **Fix Timer Incrementing**: Update `StudyTimerStateMachine.update` in `backend/app/services/timer.py` to calculate focus time based on the elapsed time between loop executions (e.g. `+3` seconds) instead of a hardcoded `+1` increment.
+- **Fix Focus Stop Routine**: Change the backend queries in `sessions.py` and `tracker.py` to identify active sessions using `FocusSession.ended_at == None` instead of checking the `completed` flag.
+- **Clear Stale React States**: Modify the dashboard React routes (`dashboard.tsx`, `focus.tsx`) to reset all state objects (summary, apps, active session, timeline) to default values immediately if `userId` becomes null or undefined.
 
----
+### Phase 2: Offline Resilience & Clerk Session Synchronization
+- **Backend Logout Endpoint**: Add `/api/auth/logout` in `auth.py`. Call this from the React client when a user logs out to reset the `ActivityTracker` and clear active timers.
+- **Offline Guest Fallback**: Update the frontend routing guards in `AppLayout.tsx` and `__root.tsx`. If `daemonStatus === "offline"`, show a descriptive offline state or allow the user to enter a "Guest Mode" with a local SQLite DB, bypassing Clerk's blocking web interface.
+- **Daemon Health Debouncer**: In `useCortexAuth.tsx`, add a threshold count to the health check interval. Only transition the app state to `"offline"` after 3 consecutive failed health check pings, preventing transient network spikes from flashing warnings.
 
-## 8. Development Roadmap
+### Phase 3: Single-Instance Enforcement & Storage Reliability
+- **Single Instance Lock**: Add `app.requestSingleInstanceLock()` to `electron/main.ts`. Exit cleanly if another instance is already running.
+- **Reliable Process Cleanup**: Refactor `killProcesses()` in Electron to track process handles cleanly, ensuring Python and Vite processes are completely terminated on Windows.
+- **Enforce Database WAL Mode**: Add explicit WAL connection checks at database startup to ensure the SQLite connection is robust under multi-threaded read/write workloads from `ActivityTracker`.
 
-### Priority 1: Core System & Bug Fixes (Dependency Order: 1)
+### Phase 4: Side-Panel AI Chat Overlay & Screen Region "Lens" Selector
+- **Side Panel Window Configuration**: Add configuration settings in `electron/main.ts` to support window resizing and docking. Dock the window on the right side of the screen with a width of ~380px.
+- **Transparent Screen Selector Overlay**: Implement a transparent window in Electron that captures the mouse cursor when "Lens" is activated, allowing the user to select screen coordinates.
+- **Visual Capture Integration**: Crop the captured screen coordinates using the `mss` library, process the cropped area via `ScreenVisionProcessor.process_screenshot`, and send the extracted text to the Ollama chat controller.
 
-- [ ] **Fix Settings & Dashboard Infinite Loaders**:
-  - Check if backend is offline or user ID is undefined in [settings.tsx](file:///D:/project/cortexai-desktop-main/src/routes/settings.tsx) and [dashboard.tsx](file:///D:/project/cortexai-desktop-main/src/routes/dashboard.tsx). Clear loading indicators and display appropriate offline/redirect screens.
-- [ ] **Clean Up Legacy Code & Unused Packages**:
-  - Remove `three` and `@types/three` dependencies from [package.json](file:///D:/project/cortexai-desktop-main/package.json) (unused WebGL orb).
-  - Delete the unused legacy `/auth/login` wrapper method from [api.ts](file:///D:/project/cortexai-desktop-main/src/lib/api.ts).
-
-### Priority 2: Modular Generative AI Engine (Dependency Order: 2)
-
-- [ ] **Create Modular AI engine structure**:
-  - Set up files under `backend/app/ai/` with base classes, factory loader, and provider plugins.
-- [ ] **Integrate Local Ollama Provider**:
-  - Create `ollama.py` provider under `backend/app/ai/providers/`.
-  - Point assistant streaming endpoint to call local Ollama models (`qwen2.5-coder:7b`).
-
-### Priority 3: Smart Activity Classification & Focus Timer (Dependency Order: 3)
-
-- [ ] **Implement Embedding-Based Similarity Tracker**:
-  - Use the SentenceTransformers embedding engine in [tracker.py](file:///D:/project/cortexai-desktop-main/backend/app/services/tracker.py) to compare window titles against a list of anchor category phrases.
-- [ ] **Update Focus Session Timer Control**:
-  - Connect the Pomodoro timer state to the background tracker. Pause/resume the timer automatically when focus state changes, and save the detailed summary metrics.
-
-### Priority 4: Proactive Assistance & Screen Vision (Dependency Order: 4)
-
-- [ ] **Add Windows Screen Capture Service**:
-  - Implement Win32 GDI screen capture in `screen_capture.py` to extract active window pixels.
-- [ ] **Integrate Local OCR Engine**:
-  - Implement local OCR text extraction in `ocr.py` using `easyocr` or `pytesseract`.
-- [ ] **Connect Proactive Help Trigger**:
-  - Monitor active window state transitions. If a compiler error is detected or the user is inactive, show the "Need Help?" dashboard prompt. When accepted, run the RAG + OCR pipeline to generate a local explanation.
-
-### Priority 5: Local Wake-Word & Whisper voice (Dependency Order: 5)
-
-- [ ] **Implement Wake Word & Whisper STT**:
-  - Setup wake word detection in `wake_word.py`.
-  - Implement audio transcription using a local Whisper model.
-
----
-
-## 9. Recommended First Step
-
-The first feature we should implement immediately is **Fixing the Infinite Loading Routing Loops** on the frontend, alongside **Cleaning up legacy packages (Three.js & Auth endpoints)**.
-
-This establishes a stable base for developers, prevents the app from hanging when the backend is offline, and clears out unnecessary packages. Following this, we can set up the **Modular AI Engine and Local Ollama integration** to transition our generative features offline.
+### Phase 5: Production Optimization, Diagnostics & Packaging
+- **Garbage Collection of Temp Data**: Implement cleanup rules in FastAPI to delete base64 images and temporary OCR frames from memory and temp directories immediately after analysis.
+- **Diagnostic Logging**: Set up a rotation policy for log files (`cortexai.log`) in `LOCALAPPDATA` to aid in debugging production issues.
+- **Production Packaging Config**: Configure `electron-builder` to bundle the React frontend and local Python dependencies into a single installer for Windows.

@@ -12,7 +12,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { Play, Pause, Sparkles, Clock, Code2, BookOpen, Coffee, Plus } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cortexClient } from "@/lib/api";
 import { useCortexAuth } from "@/hooks/useCortexAuth";
 import { parseUTCDateTime } from "@/lib/utils";
@@ -41,70 +41,92 @@ function Dashboard() {
     retrySync,
     isLoading: isAuthLoading,
     isSignedIn,
+    activeSession,
+    running,
+    elapsed,
+    activeState,
+    activeApp,
+    activeTitle,
+    activeReason,
+    timelineEvents,
+    summary,
+    chartData,
+    apps,
+    recentSessions,
+    startFocusSession,
+    endFocusSession,
   } = useCortexAuth();
+  
   const userId = user?.user_id;
   const displayName = user?.first_name || "";
 
-  const [summary, setSummary] = useState<any>(null);
-  const [chartData, setChartData] = useState<any[]>(defaultChartData);
-  const [apps, setApps] = useState<any[]>(defaultApps);
   const [reminders, setReminders] = useState<any[]>([]);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [recentSessions, setRecentSessions] = useState<any[]>([]);
+  const [recentLogs, setRecentLogs] = useState<any[]>([]);
+  const [currentAppDuration, setCurrentAppDuration] = useState(0);
 
   useEffect(() => {
-    if (!userId) return;
+    setCurrentAppDuration(0);
+  }, [activeApp, activeTitle]);
 
-    const fetchData = () => {
-      cortexClient
-        .getActivitySummary(userId)
-        .then((sum) => {
-          setSummary(sum);
-        })
-        .catch(console.error);
+  useEffect(() => {
+    if (running) return;
+    const timer = setInterval(() => {
+      setCurrentAppDuration((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [running, activeApp, activeTitle]);
 
-      cortexClient
-        .getProductivityAnalytics(userId)
-        .then((chart) => {
-          if (chart && chart.length > 0) setChartData(chart);
-        })
-        .catch(console.error);
+  const displayDurationSeconds = running ? elapsed : currentAppDuration;
+  const displayMin = Math.floor(displayDurationSeconds / 60);
+  const displaySec = displayDurationSeconds % 60;
 
-      cortexClient
-        .getAppsAnalytics(userId)
-        .then((activeApps) => {
-          if (activeApps && activeApps.length > 0) setApps(activeApps.slice(0, 4));
-        })
-        .catch(console.error);
+  const fetchDashboardSpecificData = useCallback(() => {
+    if (!userId || userId === -1) return;
 
-      cortexClient
-        .getReminders(userId)
-        .then((rems) => {
-          if (rems && rems.length > 0) {
-            setReminders(rems.filter((r) => r.is_enabled).slice(0, 3));
-          }
-        })
-        .catch(console.error);
+    cortexClient
+      .getReminders(userId)
+      .then((rems) => {
+        if (rems && rems.length > 0) {
+          setReminders(rems.filter((r) => r.is_enabled).slice(0, 3));
+        } else {
+          setReminders([]);
+        }
+      })
+      .catch(console.error);
 
-      cortexClient
-        .getSuggestions(userId)
-        .then((sugs) => {
-          if (sugs && sugs.length > 0) setSuggestions(sugs);
-        })
-        .catch(console.error);
+    cortexClient
+      .getSuggestions(userId)
+      .then((sugs) => {
+        if (sugs && sugs.length > 0) {
+          setSuggestions(sugs);
+        } else {
+          setSuggestions([]);
+        }
+      })
+      .catch(console.error);
 
-      cortexClient
-        .getRecentFocusSessions(userId)
-        .then((recs) => {
-          if (recs) setRecentSessions(recs);
-        })
-        .catch(console.error);
-    };
-
-    fetchData();
-    const interval = setInterval(fetchData, 10000); // refresh every 10s
-    return () => clearInterval(interval);
+    cortexClient
+      .getRecentActivityLogs(userId, 10)
+      .then((logs) => {
+        setRecentLogs(logs || []);
+      })
+      .catch(console.error);
   }, [userId]);
+
+  // Initial fetch on mount or user change
+  useEffect(() => {
+    if (!userId || userId === -1) {
+      setReminders([]);
+      setSuggestions([]);
+      setRecentLogs([]);
+      return;
+    }
+
+    fetchDashboardSpecificData();
+    const interval = setInterval(fetchDashboardSpecificData, 5000);
+    return () => clearInterval(interval);
+  }, [userId, fetchDashboardSpecificData]);
 
   if (isBackendOffline) {
     return (
@@ -170,21 +192,21 @@ function Dashboard() {
 
   const handleQuickAction = (action: string) => {
     if (!userId) return;
-    if (action === "Start focus" || action === "Take break") {
-      navigate({ to: "/focus" });
+    if (action === "Start focus") {
+      startFocusSession("Pomodoro Sprint", 25 * 60, "study")
+        .then(() => navigate({ to: "/focus" }))
+        .catch(console.error);
+    } else if (action === "Take break") {
+      startFocusSession("Quick break", 5 * 60, "break")
+        .then(() => navigate({ to: "/focus" }))
+        .catch(console.error);
     } else if (action === "Coding mode") {
-      cortexClient
-        .startFocusSession(userId, "Deep coding flow", 50 * 60)
-        .then(() => {
-          navigate({ to: "/focus" });
-        })
+      startFocusSession("Deep coding flow", 50 * 60, "coding")
+        .then(() => navigate({ to: "/focus" }))
         .catch(console.error);
     } else if (action === "Study mode") {
-      cortexClient
-        .startFocusSession(userId, "Focused reading and study", 50 * 60)
-        .then(() => {
-          navigate({ to: "/focus" });
-        })
+      startFocusSession("Focused reading and study", 50 * 60, "study")
+        .then(() => navigate({ to: "/focus" }))
         .catch(console.error);
     }
   };
@@ -245,93 +267,110 @@ function Dashboard() {
             </div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="white" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="white" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
-                <XAxis
-                  dataKey="day"
-                  stroke="rgba(255,255,255,0.35)"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="rgba(255,255,255,0.35)"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "rgba(20,20,22,0.95)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: 8,
-                    fontSize: 12,
-                  }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="focus"
-                  stroke="white"
-                  strokeWidth={1.5}
-                  fill="url(#g1)"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="distraction"
-                  stroke="rgba(255,255,255,0.4)"
-                  strokeWidth={1}
-                  fill="transparent"
-                  strokeDasharray="3 3"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData && chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="white" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="white" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis
+                    dataKey="day"
+                    stroke="rgba(255,255,255,0.35)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke="rgba(255,255,255,0.35)"
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "rgba(20,20,22,0.95)",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      borderRadius: 8,
+                      fontSize: 12,
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="focus"
+                    stroke="white"
+                    strokeWidth={1.5}
+                    fill="url(#g1)"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="distraction"
+                    stroke="rgba(255,255,255,0.4)"
+                    strokeWidth={1}
+                    fill="transparent"
+                    strokeDasharray="3 3"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-muted-foreground select-none font-sans border border-dashed border-border/40 rounded-md bg-surface-1/10">
+                Not enough activity history yet
+              </div>
+            )}
           </div>
         </Card>
 
-        <PomodoroCard userId={userId} />
+        <PomodoroCard />
       </div>
 
       <div className="mt-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card>
           <div className="flex items-center justify-between mb-4">
-            <div className="text-sm font-medium">Active apps</div>
-            <div className="text-xs text-muted-foreground">today</div>
+            <div className="text-sm font-medium">Active now</div>
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Live tracking</span>
           </div>
           <div className="space-y-4">
-            {apps.length > 0 ? (
-              apps.map((a) => (
-                <div key={a.name}>
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      {a.type === "code" ? (
-                        <Code2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      ) : (
-                        <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-                      )}
-                      <span>{a.name}</span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">{a.time}</span>
-                  </div>
-                  <div className="mt-2 h-1 rounded-full bg-surface-3 overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${a.pct}%` }}
-                      transition={{ duration: 0.8, ease: "easeOut" }}
-                      className="h-full bg-foreground/80"
-                    />
+            {activeApp ? (
+              <div className="space-y-3 font-sans select-none animate-in fade-in duration-300">
+                <div>
+                  <div className="text-xs text-muted-foreground">Application</div>
+                  <div className="text-sm font-medium text-foreground mt-0.5">{activeApp || "System"}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">Window Title</div>
+                  <div className="text-xs font-mono text-foreground/80 mt-0.5 truncate" title={activeTitle || ""}>
+                    {activeTitle || "Active Workspace"}
                   </div>
                 </div>
-              ))
+                <div className="flex gap-4">
+                  <div className="flex-1">
+                    <div className="text-xs text-muted-foreground">Duration</div>
+                    <div className="text-sm font-medium text-foreground mt-0.5">
+                      {displayMin}m {displaySec}s
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-xs text-muted-foreground">Classification</div>
+                    <div className="text-xs font-semibold uppercase mt-1 inline-block px-1.5 py-0.5 rounded border border-border bg-surface-2">
+                      {activeState}
+                    </div>
+                  </div>
+                </div>
+                {activeReason && (
+                  <div>
+                    <div className="text-xs text-muted-foreground">Reason/Context</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 italic leading-relaxed">
+                      {activeReason}
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
-              <div className="text-xs text-muted-foreground py-10 text-center select-none">
-                No apps tracked today. Declare an intention and start focusing!
+              <div className="text-xs text-muted-foreground py-12 text-center select-none font-sans">
+                Initializing Cortex workspace tracker...
               </div>
             )}
           </div>
@@ -367,43 +406,44 @@ function Dashboard() {
 
         <Card>
           <div className="flex items-center justify-between mb-4">
-            <div className="text-sm font-medium">Recent sessions</div>
-            <div className="text-xs text-muted-foreground">today</div>
+            <div className="text-sm font-medium">Recent activity</div>
+            <div className="text-xs text-muted-foreground">Session timeline</div>
           </div>
-          <div className="space-y-3">
-            {recentSessions.length > 0 ? (
-              recentSessions.map((s, i) => {
-                const durationMinutes = Math.round(s.duration_seconds / 60);
-                const durStr =
-                  durationMinutes >= 60
-                    ? `${Math.floor(durationMinutes / 60)}h ${durationMinutes % 60}m`
-                    : `${durationMinutes}m`;
-
-                let tagStr = "Focus";
-                if (s.intention.toLowerCase().includes("code")) tagStr = "Code";
-                else if (
-                  s.intention.toLowerCase().includes("read") ||
-                  s.intention.toLowerCase().includes("study")
-                )
-                  tagStr = "Study";
+          <div className="space-y-3 overflow-y-auto max-h-[220px] pr-1">
+            {recentLogs && recentLogs.length > 0 ? (
+              recentLogs.map((evt, i) => {
+                const startTimeStr = evt.timestamp
+                  ? parseUTCDateTime(evt.timestamp).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })
+                  : "";
+                const durMin = Math.round(evt.duration_seconds / 60);
+                const durStr = durMin > 0 ? `${durMin}m` : `${evt.duration_seconds}s`;
 
                 return (
-                  <div key={s.id || i} className="flex items-center justify-between text-sm">
-                    <div className="min-w-0">
-                      <div className="truncate" title={s.intention}>
-                        {s.intention}
-                      </div>
-                      <div className="text-xs text-muted-foreground">{durStr}</div>
+                  <div key={i} className="rounded-md border border-border bg-surface-1/40 p-2.5 text-xs font-sans space-y-1 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-muted-foreground select-none">
+                      <span>{startTimeStr}</span>
+                      <span className="font-semibold uppercase tracking-wider text-[9px] px-1 rounded border border-border bg-surface-2">
+                        {evt.category}
+                      </span>
                     </div>
-                    <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {tagStr}
-                    </span>
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="font-medium text-foreground truncate max-w-[70%]" title={evt.app_name}>
+                        {evt.app_name || "System"}
+                      </div>
+                      <div className="text-muted-foreground shrink-0">{durStr}</div>
+                    </div>
+                    <div className="text-[10px] text-muted-foreground truncate" title={evt.reason || evt.window_title}>
+                      {evt.reason || evt.window_title || "Productive work"}
+                    </div>
                   </div>
                 );
               })
             ) : (
-              <div className="text-xs text-muted-foreground py-10 text-center select-none">
-                No recent focus sessions completed today.
+              <div className="text-xs text-muted-foreground py-12 text-center select-none font-sans">
+                No recent activity events recorded. Active workspace context is recorded continuously.
               </div>
             )}
           </div>
@@ -468,85 +508,26 @@ function ReminderRow({ label, time }: { label: string; time: string }) {
   );
 }
 
-function PomodoroCard({ userId }: { userId: number }) {
-  const [activeSession, setActiveSession] = useState<any>(null);
-  const [running, setRunning] = useState(false);
-  const [seconds, setSeconds] = useState(25 * 60);
+function PomodoroCard() {
+  const {
+    activeSession,
+    running,
+    elapsed,
+    startFocusSession,
+    endFocusSession,
+    pauseFocusSession,
+    resumeFocusSession,
+  } = useCortexAuth();
 
-  // Dynamic total length based on active session configuration
   const total = activeSession?.target_duration_seconds || 25 * 60;
-
-  useEffect(() => {
-    if (!userId) return;
-
-    const checkSession = () => {
-      cortexClient
-        .getActiveFocusSession(userId)
-        .then((sess) => {
-          if (sess) {
-            setActiveSession(sess);
-            setRunning(true);
-            const startTime = parseUTCDateTime(sess.started_at).getTime();
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const target = sess.target_duration_seconds || 25 * 60;
-            const calculatedRemaining = Math.max(0, target - elapsed);
-            setSeconds((current) => {
-              // Only update if difference is significant to avoid countdown jumps due to clock drift
-              if (Math.abs(current - calculatedRemaining) > 3) {
-                return calculatedRemaining;
-              }
-              return current;
-            });
-          } else {
-            setActiveSession(null);
-            setRunning(false);
-            setSeconds(25 * 60);
-          }
-        })
-        .catch(console.error);
-    };
-
-    checkSession();
-    const interval = setInterval(checkSession, 5000);
-    return () => clearInterval(interval);
-  }, [userId]);
-
-  useEffect(() => {
-    if (!running || !activeSession) return;
-    const t = setInterval(() => {
-      setSeconds((s) => {
-        if (s <= 1) {
-          clearInterval(t);
-          cortexClient
-            .endFocusSession(activeSession.id, true, 0)
-            .then(() => {
-              setActiveSession(null);
-              setRunning(false);
-              setSeconds(25 * 60);
-              if ((window as any).cortexAPI?.sendNotification) {
-                (window as any).cortexAPI.sendNotification(
-                  "Focus Session Completed!",
-                  "Your Pomodoro session has completed! Take a break.",
-                );
-              }
-            })
-            .catch(console.error);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(t);
-  }, [running, activeSession]);
+  const remaining = Math.max(0, total - elapsed);
+  const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
+  const ss = String(remaining % 60).padStart(2, "0");
+  const pct = running ? Math.min(1.0, elapsed / total) : 0;
 
   const handleStart = () => {
-    if (!userId) return;
-    cortexClient
-      .startFocusSession(userId, "Dashboard Pomodoro sprint", 25 * 60)
-      .then((sess) => {
-        setActiveSession(sess);
-        setRunning(true);
-        setSeconds(25 * 60);
+    startFocusSession("Dashboard Pomodoro sprint", 25 * 60)
+      .then(() => {
         if ((window as any).cortexAPI?.sendNotification) {
           (window as any).cortexAPI.sendNotification(
             "Focus Session Started",
@@ -559,12 +540,8 @@ function PomodoroCard({ userId }: { userId: number }) {
 
   const handleStop = () => {
     if (activeSession) {
-      cortexClient
-        .endFocusSession(activeSession.id, false, 0)
+      endFocusSession(false, elapsed)
         .then(() => {
-          setActiveSession(null);
-          setRunning(false);
-          setSeconds(25 * 60);
           if ((window as any).cortexAPI?.sendNotification) {
             (window as any).cortexAPI.sendNotification(
               "Focus Session Stopped",
@@ -576,16 +553,27 @@ function PomodoroCard({ userId }: { userId: number }) {
     }
   };
 
-  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
-  const ss = String(seconds % 60).padStart(2, "0");
-  const pct = 1 - seconds / total;
+  const handleSkip = () => {
+    if (activeSession) {
+      endFocusSession(false, elapsed, "skipped")
+        .then(() => {
+          if ((window as any).cortexAPI?.sendNotification) {
+            (window as any).cortexAPI.sendNotification(
+              "Focus Session Skipped",
+              "Focus session has been skipped.",
+            );
+          }
+        })
+        .catch(console.error);
+    }
+  };
 
   return (
     <Card>
       <div className="flex items-center justify-between mb-3">
         <div className="text-sm font-medium">Pomodoro</div>
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          {running ? "Active" : "Ready"}
+          {activeSession ? (activeSession.status === "paused" ? "Paused" : "Active") : "Ready"}
         </span>
       </div>
       <div className="relative mx-auto my-3 grid place-items-center">
@@ -608,6 +596,7 @@ function PomodoroCard({ userId }: { userId: number }) {
             strokeLinecap="round"
             strokeDasharray={2 * Math.PI * 54}
             strokeDashoffset={2 * Math.PI * 54 * (1 - pct)}
+            className="transition-[stroke-dashoffset] duration-1000"
           />
         </svg>
         <div className="absolute inset-0 grid place-items-center">
@@ -621,14 +610,28 @@ function PomodoroCard({ userId }: { userId: number }) {
           </div>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Button className="flex-1" onClick={running ? handleStop : handleStart}>
-          {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-          {running ? "Stop" : "Start"}
-        </Button>
-        <Button variant="outline" className="flex-1" onClick={handleStop} disabled={!running}>
-          Skip
-        </Button>
+      <div className="flex gap-2 flex-wrap">
+        {!activeSession ? (
+          <Button className="w-full" onClick={handleStart}>
+            <Play className="h-4 w-4 mr-2" /> Start Focus
+          </Button>
+        ) : (
+          <>
+            <Button
+              className="flex-1"
+              onClick={activeSession.status === "paused" ? resumeFocusSession : pauseFocusSession}
+            >
+              {activeSession.status === "paused" ? <Play className="h-4 w-4 mr-1.5" /> : <Pause className="h-4 w-4 mr-1.5" />}
+              {activeSession.status === "paused" ? "Resume" : "Pause"}
+            </Button>
+            <Button variant="outline" className="flex-1" onClick={handleStop}>
+              Stop
+            </Button>
+            <Button variant="outline" className="w-full mt-1.5" onClick={handleSkip}>
+              Skip Session
+            </Button>
+          </>
+        )}
       </div>
     </Card>
   );

@@ -21,6 +21,9 @@ class FocusSession(SQLModel, table=True):
     target_duration_seconds: int = Field(default=1500) # Default to 25 minutes (1500s)
     distraction_count: int = Field(default=0)
     completed: bool = Field(default=False)
+    status: str = Field(default="running") # "running", "paused", "completed", "skipped", "cancelled"
+    paused_at: Optional[datetime] = None
+    focus_type: str = Field(default="study") # "study", "coding", "break"
 
 class UserSettings(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -53,6 +56,10 @@ class ActivityLog(SQLModel, table=True):
     duration_seconds: int
     category: str = Field(default="unclassified") # 'code', 'study', 'distraction', 'idle'
     productivity_score: int = Field(default=0) # -2 to +2
+    end_timestamp: Optional[datetime] = None
+    active_state: str = Field(default="active")
+    focus_session_id: Optional[int] = Field(default=None, foreign_key="focussession.id")
+    reason: Optional[str] = None
 
 class Reminder(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

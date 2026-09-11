@@ -14,8 +14,10 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RemindersRouteImport } from './routes/reminders'
 import { Route as MaterialsRouteImport } from './routes/materials'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as LensOverlayRouteImport } from './routes/lens-overlay'
 import { Route as FocusRouteImport } from './routes/focus'
 import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as CompanionWidgetRouteImport } from './routes/companion-widget'
 import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as IndexRouteImport } from './routes/index'
@@ -45,6 +47,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LensOverlayRoute = LensOverlayRouteImport.update({
+  id: '/lens-overlay',
+  path: '/lens-overlay',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const FocusRoute = FocusRouteImport.update({
   id: '/focus',
   path: '/focus',
@@ -53,6 +60,11 @@ const FocusRoute = FocusRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CompanionWidgetRoute = CompanionWidgetRouteImport.update({
+  id: '/companion-widget',
+  path: '/companion-widget',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AssistantRoute = AssistantRouteImport.update({
@@ -75,8 +87,10 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/assistant': typeof AssistantRoute
+  '/companion-widget': typeof CompanionWidgetRoute
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
+  '/lens-overlay': typeof LensOverlayRoute
   '/login': typeof LoginRoute
   '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
@@ -87,8 +101,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/assistant': typeof AssistantRoute
+  '/companion-widget': typeof CompanionWidgetRoute
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
+  '/lens-overlay': typeof LensOverlayRoute
   '/login': typeof LoginRoute
   '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
@@ -100,8 +116,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/assistant': typeof AssistantRoute
+  '/companion-widget': typeof CompanionWidgetRoute
   '/dashboard': typeof DashboardRoute
   '/focus': typeof FocusRoute
+  '/lens-overlay': typeof LensOverlayRoute
   '/login': typeof LoginRoute
   '/materials': typeof MaterialsRoute
   '/reminders': typeof RemindersRoute
@@ -114,8 +132,10 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/assistant'
+    | '/companion-widget'
     | '/dashboard'
     | '/focus'
+    | '/lens-overlay'
     | '/login'
     | '/materials'
     | '/reminders'
@@ -126,8 +146,10 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/assistant'
+    | '/companion-widget'
     | '/dashboard'
     | '/focus'
+    | '/lens-overlay'
     | '/login'
     | '/materials'
     | '/reminders'
@@ -138,8 +160,10 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/assistant'
+    | '/companion-widget'
     | '/dashboard'
     | '/focus'
+    | '/lens-overlay'
     | '/login'
     | '/materials'
     | '/reminders'
@@ -151,8 +175,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AnalyticsRoute: typeof AnalyticsRoute
   AssistantRoute: typeof AssistantRoute
+  CompanionWidgetRoute: typeof CompanionWidgetRoute
   DashboardRoute: typeof DashboardRoute
   FocusRoute: typeof FocusRoute
+  LensOverlayRoute: typeof LensOverlayRoute
   LoginRoute: typeof LoginRoute
   MaterialsRoute: typeof MaterialsRoute
   RemindersRoute: typeof RemindersRoute
@@ -197,6 +223,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/lens-overlay': {
+      id: '/lens-overlay'
+      path: '/lens-overlay'
+      fullPath: '/lens-overlay'
+      preLoaderRoute: typeof LensOverlayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/focus': {
       id: '/focus'
       path: '/focus'
@@ -209,6 +242,13 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/companion-widget': {
+      id: '/companion-widget'
+      path: '/companion-widget'
+      fullPath: '/companion-widget'
+      preLoaderRoute: typeof CompanionWidgetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/assistant': {
@@ -239,8 +279,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AnalyticsRoute: AnalyticsRoute,
   AssistantRoute: AssistantRoute,
+  CompanionWidgetRoute: CompanionWidgetRoute,
   DashboardRoute: DashboardRoute,
   FocusRoute: FocusRoute,
+  LensOverlayRoute: LensOverlayRoute,
   LoginRoute: LoginRoute,
   MaterialsRoute: MaterialsRoute,
   RemindersRoute: RemindersRoute,

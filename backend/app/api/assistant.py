@@ -4,7 +4,7 @@ from typing import Optional, List, AsyncGenerator
 from sqlmodel import Session, select
 from app.database import get_session
 from app.api.auth import verify_user_access
-from app.models import ActivityLog, FocusSession, ChatMessage, Document, DocumentChunk
+from app.models import ActivityLog, FocusSession, FocusSessionEvent, ChatMessage, Document, DocumentChunk
 from pydantic import BaseModel
 from app.ai.engine import ai_engine
 from app.ai.context import get_recent_context
@@ -12,7 +12,11 @@ from app.rag.retriever import retriever
 import os
 import json
 import asyncio
+import base64
+from io import BytesIO
+from PIL import Image
 from datetime import datetime, timedelta
+from app.services.vision_ocr import screen_vision_processor
 
 router = APIRouter()
 
@@ -21,6 +25,7 @@ class ChatRequest(BaseModel):
     message: str
     mode: str = "general"
     document_id: Optional[int] = None
+    image_base64: Optional[str] = None
 
 async def save_assistant_message(user_id: int, content: str):
     from app.database import engine
@@ -139,18 +144,51 @@ async def generate_structured_gen(prompt: str, context: str, history: list, mode
     except Exception as e:
         yield "data: " + json.dumps({"error": f"Failed to complete generation: {str(e)}"}) + "\n\n"
 
-async def ai_streaming_generator(user_id: int, prompt: str, context: str, history: list, mode: str, references: list):
+async def ai_streaming_generator(user_id: int, prompt: str, context: str, history: list, mode: str, references: list, image_base64: Optional[str] = None):
     try:
+        if image_base64:
+            print(f"[ASSISTANT] image_base64 received: True", flush=True)
+            print(f"[ASSISTANT] image_base64 length: {len(image_base64)}", flush=True)
+            try:
+                # Run OCR to get text from the image before sending to AI
+                header, encoded = image_base64.split(",", 1) if "," in image_base64 else ("", image_base64)
+                image_data = base64.b64decode(encoded)
+                pil_image = Image.open(BytesIO(image_data))
+                print(f"[VISION] Image decoded successfully", flush=True)
+                print(f"[VISION] dimensions = {pil_image.width} x {pil_image.height}", flush=True)
+                
+                print(f"[OCR] Starting OCR", flush=True)
+                processed_np = screen_vision_processor.preprocess_image(pil_image)
+                ocr_results = screen_vision_processor.run_ocr(processed_np)
+                print(f"[OCR] OCR completed", flush=True)
+                
+                if ocr_results:
+                    extracted_text = " ".join([item["text"] for item in ocr_results])
+                    print(f"[OCR] Extracted text: {extracted_text[:100]}...", flush=True)
+                    if extracted_text.strip():
+                        prompt = f"User uploaded a screenshot. The system extracted the following text from it via OCR:\n\n=== EXTRACTED TEXT ===\n{extracted_text}\n======================\n\nUser request: {prompt}"
+                        print(f"[ASSISTANT] OCR text length: {len(extracted_text)}", flush=True)
+                        print(f"[ASSISTANT] OCR text successfully injected into prompt", flush=True)
+            except Exception as e:
+                print(f"[OCR] Failed to extract text from attached image in chat stream: {str(e)}", flush=True)
+
         # 1. Yield citations immediately if present
         if references:
             yield "data: " + json.dumps({"references": references}) + "\n\n"
             await asyncio.sleep(0.05)
             
         full_text = ""
-        async for chunk in ai_engine.stream(prompt, context, history, mode=mode):
+        print("[STREAM] Generation started", flush=True)
+        token_count = 0
+        async for chunk in ai_engine.stream(prompt, context, history, mode=mode, image_base64=None):
+            if token_count == 0:
+                print("[STREAM] Token received", flush=True)
+            token_count += 1
             full_text += chunk
             yield "data: " + json.dumps({"token": chunk}) + "\n\n"
+            await asyncio.sleep(0.01)  # small yield
             
+        print("[STREAM] Generation completed", flush=True)
         if full_text:
             await save_assistant_message(user_id, full_text)
             
@@ -175,10 +213,13 @@ def chat_stream(request: ChatRequest, session: Session = Depends(get_session), a
     
     history_list = [{"role": msg.role, "content": msg.content} for msg in history_msgs if msg.id != user_msg.id]
     
-    # Check if local Ollama model is running and reachable
+    # Check if AI provider model is running and reachable
     if not ai_engine.health_check():
+        import os
+        provider = os.getenv("AI_PROVIDER", "ollama").lower()
+        err_code = "OPENAI_NOT_CONFIGURED" if provider == "openai" else "OLLAMA_OFFLINE"
         return StreamingResponse(
-            (f"data: {json.dumps({'error': 'OLLAMA_OFFLINE'})}\n\n" for _ in range(1)),
+            (f"data: {json.dumps({'error': err_code})}\n\n" for _ in range(1)),
             media_type="text/event-stream"
         )
         
@@ -293,7 +334,7 @@ def chat_stream(request: ChatRequest, session: Session = Depends(get_session), a
         )
         
     return StreamingResponse(
-        ai_streaming_generator(request.user_id, request.message, context, history_list, request.mode, references),
+        ai_streaming_generator(request.user_id, request.message, context, history_list, request.mode, references, request.image_base64),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -318,6 +359,29 @@ def clear_chat_history(user_id: int, session: Session = Depends(get_session), _ 
 
 @router.get("/health")
 def assistant_health():
-    return {"status": "ok" if ai_engine.health_check() else "offline"}
+    import os
+    import urllib.request
+    import json
+    from app.ai.factory import ai_factory
+    
+    status = ai_engine.get_detailed_status()
+    models_list = []
+    
+    try:
+        engine = ai_factory.get_engine()
+        provider = os.getenv("AI_PROVIDER", "ollama").lower()
+        if provider == "ollama" and hasattr(engine, "base_url"):
+            url = f"{engine.base_url}/api/tags"
+            with urllib.request.urlopen(url, timeout=2) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                models_list = [m["name"] for m in data.get("models", [])]
+    except Exception:
+        pass
+
+    return {
+        "status": status,
+        "model_name": ai_factory.model_name,
+        "models_available": models_list
+    }
 
 

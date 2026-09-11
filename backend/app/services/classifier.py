@@ -20,11 +20,26 @@ def cosine_similarity(v1: List[float], v2: List[float]) -> float:
 
 class ContextClassifier:
     def __init__(self):
-        # Cache category prototype embeddings to save calculation time
-        self.study_prototype = embedding_engine.embed_query("coding programming learning lecture mathematics tutorial computer science research documentation")
-        self.distr_prototype = embedding_engine.embed_query("social media entertainment gameplay movie music chatting memes shopping video games")
+        # Prototypes will be lazy initialized on demand
+        self.study_prototype = None
+        self.distr_prototype = None
         # In-memory feedback embedding cache to prevent DB/model overhead
         self._feedback_embed_cache = {}
+        # In-memory classification results cache
+        self._classify_cache = {}
+
+    def _lazy_init_prototypes(self):
+        if self.study_prototype is None:
+            self.study_prototype = embedding_engine.embed_query("coding programming learning lecture mathematics tutorial computer science research documentation")
+        if self.distr_prototype is None:
+            self.distr_prototype = embedding_engine.embed_query("social media entertainment gameplay movie music chatting memes shopping video games")
+
+    def invalidate_user_cache(self, user_id: int):
+        keys_to_remove = [k for k in self._classify_cache if k[0] == user_id]
+        for k in keys_to_remove:
+            self._classify_cache.pop(k, None)
+        self._feedback_embed_cache.clear()
+        print(f"[ContextClassifier] Invalidated cache for user_id: {user_id}", flush=True)
 
     def get_feedback_embedding(self, feedback_id: int, title: str) -> List[float]:
         if feedback_id in self._feedback_embed_cache:
@@ -46,6 +61,10 @@ class ContextClassifier:
         Classifies active desktop context using direct rules, semantic goal mapping,
         category similarity, and historical feedback corrections.
         """
+        cache_key = (user_id, app_name, window_title, study_goal)
+        if cache_key in self._classify_cache:
+            return self._classify_cache[cache_key]
+
         if not app_name or app_name.lower() == "idle" or window_title == "System Idle":
             return {
                 "category": "idle",
@@ -58,12 +77,54 @@ class ContextClassifier:
         app_lower = app_name.lower().strip()
         title_lower = window_title.lower().strip() if window_title else ""
         
+        # Ignore CortexAI/Electron apps from productive classification
+        is_cortex_app = ("cortexai" in app_lower or "electron" in app_lower) and not any(b in app_lower for b in ["chrome", "firefox", "msedge", "safari", "browser"])
+        is_cortex_page = any(prefix in title_lower for prefix in ["dashboard", "focus", "analytics", "study materials", "reminders", "settings"]) and "cortexai" in title_lower
+        if is_cortex_app or is_cortex_page or title_lower == "cortexai":
+            return {
+                "category": "unknown",
+                "study_score": 0.0,
+                "distraction_score": 0.0,
+                "confidence": 1.0,
+                "reason": "CortexAI application itself."
+            }
+
+        # Task Manager handling (defaults to unknown)
+        if "taskmgr" in app_lower or "task manager" in title_lower:
+            return {
+                "category": "unknown",
+                "study_score": 0.0,
+                "distraction_score": 0.0,
+                "confidence": 1.0,
+                "reason": "Task Manager application."
+            }
+
+        # ChatGPT context-sensitive handling
+        if "chatgpt" in app_lower or "chatgpt" in title_lower or "openai" in app_lower or "chat.openai" in title_lower:
+            if study_goal:
+                is_coding_goal = any(c in study_goal.lower() for c in ["code", "coding", "program", "develop", "software", "bug", "compile", "script"])
+                return {
+                    "category": "coding" if is_coding_goal else "study",
+                    "study_score": 0.85,
+                    "distraction_score": 0.0,
+                    "confidence": 0.85,
+                    "reason": f"ChatGPT used for active goal: {study_goal}"
+                }
+            else:
+                return {
+                    "category": "unknown",
+                    "study_score": 0.40,
+                    "distraction_score": 0.20,
+                    "confidence": 0.60,
+                    "reason": "ChatGPT used outside of focus session target context."
+                }
+
         # 1. Rule signals
         rule_study = 0.0
         rule_distr = 0.0
         
-        coding_apps = ["code.exe", "windowsterminal.exe", "cmd.exe", "powershell.exe", "idea64.exe", "pycharm64.exe", "eclipse.exe", "vscode"]
-        distr_apps = ["spotify.exe", "steam.exe", "discord.exe", "slack.exe", "whatsapp.exe", "telegram.exe"]
+        coding_apps = ["code.exe", "windowsterminal.exe", "cmd.exe", "powershell.exe", "idea64.exe", "pycharm64.exe", "eclipse.exe", "vscode", "github"]
+        distr_apps = ["spotify.exe", "steam.exe", "discord.exe", "slack.exe", "whatsapp.exe", "telegram.exe", "linkedin", "pinterest"]
         browser_apps = ["chrome.exe", "firefox.exe", "msedge.exe", "browser.exe", "safari"]
 
         if any(c in app_lower for c in coding_apps):
@@ -95,6 +156,7 @@ class ContextClassifier:
         cat_study = 0.0
         cat_distr = 0.0
         if window_title:
+            self._lazy_init_prototypes()
             title_vec = embedding_engine.embed_query(window_title)
             cat_study = cosine_similarity(title_vec, self.study_prototype)
             cat_distr = cosine_similarity(title_vec, self.distr_prototype)
@@ -149,7 +211,7 @@ class ContextClassifier:
         # Decide category label
         reasons = []
         if study_score >= 0.55 and study_score > distraction_score:
-            category = "study"
+            category = "coding" if any(c in app_lower for c in coding_apps) else "study"
             confidence = round(study_score, 4)
             if rule_study > 0: reasons.append("Rule Whitelist")
             if semantic_study_score > 0: reasons.append(f"Goal Semantic Match ({round(goal_sim, 2)})")
@@ -168,13 +230,15 @@ class ContextClassifier:
             
         reason_str = " + ".join(reasons) if reasons else "No dominant signals"
         
-        return {
+        result = {
             "category": category,
             "study_score": round(study_score, 4),
             "distraction_score": round(distraction_score, 4),
             "confidence": confidence,
             "reason": reason_str
         }
+        self._classify_cache[cache_key] = result
+        return result
 
 # Singleton helper
 context_classifier = ContextClassifier()

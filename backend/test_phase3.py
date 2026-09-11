@@ -196,6 +196,7 @@ def run_tests():
         )
         session.add(feedback)
         session.commit()
+        context_classifier.invalidate_user_cache(user_id)
         
         # Query classification for the EXACT corrected title
         c_corrected = context_classifier.classify(

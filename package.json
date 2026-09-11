@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "electron:build": "tsc -p tsconfig.electron.json",
+    "electron:build": "tsc -p tsconfig.electron.json && node -e \"require('fs').writeFileSync('dist-electron/package.json', '{\\\"type\\\": \\\"commonjs\\\"}')\"",
     "electron:start": "npm run electron:build && electron ."
   },
   "dependencies": {

@@ -68,6 +68,51 @@ def create_activity_log(data: ActivityLogCreate, session: Session = Depends(get_
     session.refresh(log)
     return log
 
+@router.get("/current")
+def get_current_window(session: Session = Depends(get_session)):
+    import sys
+    from app.models import FocusSession
+    for mod in list(sys.modules.values()):
+        if mod and hasattr(mod, "tracker") and getattr(mod, "tracker") is not None:
+            tracker_obj = getattr(mod, "tracker")
+            from app.services.tracker import ActivityTracker
+            if isinstance(tracker_obj, ActivityTracker):
+                app_name, window_title = tracker_obj.get_active_window_details()
+                
+                # Resolve classification matching active user
+                user_id = tracker_obj.user_id or 1
+                stmt = select(FocusSession).where(
+                    FocusSession.user_id == user_id,
+                    FocusSession.ended_at == None
+                )
+                active_sess = session.exec(stmt).first()
+                study_goal = active_sess.intention if active_sess else ""
+                
+                from app.services.classifier import context_classifier
+                classification = context_classifier.classify(
+                    session=session,
+                    user_id=user_id,
+                    app_name=app_name,
+                    window_title=window_title,
+                    study_goal=study_goal
+                )
+                
+                return {
+                    "app_name": app_name,
+                    "window_title": window_title,
+                    "category": classification["category"],
+                    "reason": classification["reason"],
+                    "confidence": classification["confidence"]
+                }
+            
+    return {
+        "app_name": "Idle",
+        "window_title": "System Idle",
+        "category": "idle",
+        "reason": "Tracker not initialized",
+        "confidence": 1.0
+    }
+
 @router.get("/summary/{user_id}")
 def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
     limit_date = datetime.utcnow() - timedelta(days=days)
@@ -76,14 +121,14 @@ def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends
     
     # Calculate sum of productivity metrics
     total_duration = sum(l.duration_seconds for l in logs)
-    code_duration = sum(l.duration_seconds for l in logs if l.category == "code")
+    code_duration = sum(l.duration_seconds for l in logs if l.category in ["code", "coding"])
     study_duration = sum(l.duration_seconds for l in logs if l.category == "study")
     distr_duration = sum(l.duration_seconds for l in logs if l.category == "distraction")
     
     # Calculate today's metrics
     start_of_today = get_start_of_today_utc(user_id, session)
     today_logs = [l for l in logs if l.timestamp >= start_of_today]
-    today_code = sum(l.duration_seconds for l in today_logs if l.category == "code")
+    today_code = sum(l.duration_seconds for l in today_logs if l.category in ["code", "coding"])
     today_study = sum(l.duration_seconds for l in today_logs if l.category == "study")
     today_distr = sum(l.duration_seconds for l in today_logs if l.category == "distraction")
     
@@ -106,12 +151,36 @@ def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends
     from app.models import FocusSession
     focus_statement = select(FocusSession).where(
         FocusSession.user_id == user_id,
-        FocusSession.started_at >= start_of_today,
-        FocusSession.completed == True
+        FocusSession.started_at >= start_of_today
     )
-    today_sessions = session.exec(focus_statement).all()
-    today_sessions_count = len(today_sessions)
+    today_focus_sessions = session.exec(focus_statement).all()
+    today_sessions_count = len([s for s in today_focus_sessions if s.completed])
+    total_focus_count = len(today_focus_sessions)
+    completed_focus_count = today_sessions_count
+
+    # PRODUCTIVITY SCORE FORMULA DOCUMENTATION:
+    # 1. active_seconds = sum of focus & distraction seconds today.
+    # 2. base_score = ratio of productive focus seconds vs total active seconds.
+    # 3. distraction_penalty = ratio of distraction time * 40.
+    # 4. completion_bonus = multiplier scaling based on completion rate of started focus sessions.
+    active_seconds = today_code + today_study + today_distr
+    productive_seconds = today_code + today_study
     
+    if active_seconds > 0:
+        base_ratio = productive_seconds / active_seconds
+        distr_ratio = today_distr / active_seconds
+        
+        # Raw score base
+        raw_score = (base_ratio - (distr_ratio * 0.4)) * 100
+        score = max(0, min(100, int(raw_score)))
+        
+        # Apply completion rate scaling if any sessions started
+        if total_focus_count > 0:
+            completion_rate = completed_focus_count / total_focus_count
+            score = max(0, min(100, int(score * (0.8 + 0.2 * completion_rate))))
+    else:
+        score = 0
+        
     return {
         "total_seconds": total_duration,
         "categories": {
@@ -119,7 +188,7 @@ def get_activity_summary(user_id: int, days: int = 7, session: Session = Depends
             "study": study_duration,
             "distraction": distr_duration
         },
-        "score": 0 if total_duration == 0 else max(0, int((code_duration + study_duration - distr_duration) / max(total_duration, 1) * 100)),
+        "score": score,
         "today": {
             "focus_seconds": today_code + today_study,
             "distraction_seconds": today_distr,
@@ -134,6 +203,9 @@ def get_productivity_analytics(user_id: int, session: Session = Depends(get_sess
     statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= limit_date)
     logs = session.exec(statement).all()
     
+    if not logs or sum(l.duration_seconds for l in logs) == 0:
+        return []
+        
     # Get user settings timezone
     settings_statement = select(UserSettings).where(UserSettings.user_id == user_id)
     settings = session.exec(settings_statement).first()
@@ -152,7 +224,7 @@ def get_productivity_analytics(user_id: int, session: Session = Depends(get_sess
         log_date = local_time.date()
         if log_date in data:
             hours = log.duration_seconds / 3600.0
-            if log.category in ["code", "study"]:
+            if log.category in ["code", "coding", "study"]:
                 data[log_date]["focus"] += hours
             elif log.category == "distraction":
                 data[log_date]["distraction"] += hours
@@ -190,8 +262,26 @@ def get_heatmap_analytics(user_id: int, session: Session = Depends(get_session),
 
 @router.get("/analytics/apps/{user_id}")
 def get_apps_analytics(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
-    start_of_today = get_start_of_today_utc(user_id, session)
-    statement = select(ActivityLog).where(ActivityLog.user_id == user_id, ActivityLog.timestamp >= start_of_today)
+    from app.models import FocusSession
+    
+    # Query current active focus session
+    stmt_active = select(FocusSession).where(
+        FocusSession.user_id == user_id,
+        FocusSession.ended_at == None
+    )
+    active_sess = session.exec(stmt_active).first()
+    
+    if active_sess:
+        start_time = active_sess.started_at
+        end_time = datetime.utcnow()
+    else:
+        return []
+            
+    statement = select(ActivityLog).where(
+        ActivityLog.user_id == user_id,
+        ActivityLog.timestamp >= start_time,
+        ActivityLog.timestamp <= end_time
+    )
     logs = session.exec(statement).all()
     
     app_durations = {}
@@ -327,44 +417,40 @@ def get_activity_suggestions(
     logs = session.exec(statement).all()
     
     total_sec = sum(l.duration_seconds for l in logs)
-    code_sec = sum(l.duration_seconds for l in logs if l.category == "code")
+    code_sec = sum(l.duration_seconds for l in logs if l.category in ["code", "coding"])
     study_sec = sum(l.duration_seconds for l in logs if l.category == "study")
-    distr_sec = sum(l.duration_seconds for l in logs if l.category == "distraction")
     
     suggestions = []
     
-    # 1. Distraction alert
-    if distr_sec > 1800: # > 30 minutes of distraction
-        minutes = int(distr_sec // 60)
-        suggestions.append(f"You spent {minutes}m on distracting apps today. Consider scheduling a deep-focus Pomodoro sprint to reset.")
-    elif total_sec > 0 and (code_sec + study_sec) / total_sec >= 0.8:
-        suggestions.append("Incredible focus ratio today! You've spent over 80% of your desktop time on productive work.")
+    # 1. Coding time suggestion
+    if code_sec > 0:
+        minutes = int(code_sec // 60)
+        suggestions.append(f"You spent {minutes} minutes coding in VS Code today.")
         
-    # 2. Focus suggestions
-    if code_sec > 3600: # > 1 hour coding
-        hours = round(code_sec / 3600.0, 1)
-        suggestions.append(f"You've been coding for {hours}h today. Remember to follow the 20-20-20 rule to rest your eyes.")
+    # 2. No study/coding activity alert
+    if code_sec == 0 and study_sec == 0:
+        suggestions.append("You have no study activity recorded today.")
         
-    # 3. Time pattern suggestion
-    if logs:
-        focus_logs = [l for l in logs if l.category in ["code", "study"]]
-        if focus_logs:
-            hours = [l.timestamp.hour for l in focus_logs]
-            from collections import Counter
-            peak_hour = Counter(hours).most_common(1)[0][0]
-            statement_settings = select(UserSettings).where(UserSettings.user_id == user_id)
-            settings = session.exec(statement_settings).first()
-            tz_name = settings.timezone if settings else "UTC"
-            try:
-                import zoneinfo
-                dt_utc = datetime.utcnow().replace(hour=peak_hour, minute=0, second=0)
-                dt_local = to_user_timezone(dt_utc, tz_name)
-                peak_hour_str = dt_local.strftime("%I:%M %p")
-                suggestions.append(f"Your deep-focus peaks around {peak_hour_str} — block that window tomorrow for your hardest tasks.")
-            except Exception:
-                suggestions.append(f"Your deep-focus peaks around {peak_hour}:00 today.")
-
-    # Fallbacks if list is too short
+    # 3. Context switches during last focus session
+    from app.models import FocusSession
+    stmt_last = select(FocusSession).where(
+        FocusSession.user_id == user_id,
+        FocusSession.ended_at != None
+    ).order_by(FocusSession.ended_at.desc()).limit(1)
+    last_sess = session.exec(stmt_last).first()
+    if last_sess:
+        switches = last_sess.distraction_count or 0
+        suggestions.append(f"You switched away from your focus context {switches} times during the last session.")
+        
+    # Fallback to general productivity score message
+    if total_sec > 0:
+        # Recompute score for today's logs
+        active_seconds = code_sec + study_sec + sum(l.duration_seconds for l in logs if l.category == "distraction")
+        if active_seconds > 0:
+            score = int((code_sec + study_sec) / active_seconds * 100)
+            suggestions.append(f"Your productivity score is {score}% today.")
+            
+    # Generic learning fallbacks if suggestions count is low
     if len(suggestions) < 3:
         suggestions.append("Cortex is analyzing your workspace patterns. Add course materials in Study Materials to enable custom RAG tutoring suggestions.")
     if len(suggestions) < 3:
@@ -377,11 +463,27 @@ def get_activity_suggestions(
 @router.post("/mock_active_window")
 def mock_active_window(app_name: str, window_title: str):
     import sys
+    found = False
     for mod in list(sys.modules.values()):
         if mod and hasattr(mod, "tracker") and getattr(mod, "tracker") is not None:
             tracker_obj = getattr(mod, "tracker")
             tracker_obj._mock_app = app_name
             tracker_obj._mock_title = window_title
-            print(f"[CortexMock] Foreground window mocked to: {app_name} | {window_title}", flush=True)
-            return {"status": "success", "mocked_app": app_name, "mocked_title": window_title}
+            print(f"[CortexMock] Foreground window mocked to: {app_name} | {window_title} in module {getattr(mod, '__name__', str(mod))}", flush=True)
+            found = True
+    if found:
+        return {"status": "success", "mocked_app": app_name, "mocked_title": window_title}
     return {"status": "failed", "message": "Tracker not found"}
+
+@router.get("/logs/recent/{user_id}")
+def get_recent_activity_logs(
+    user_id: int,
+    limit: int = 15,
+    session: Session = Depends(get_session),
+    _ = Depends(verify_user_access)
+):
+    statement = select(ActivityLog).where(
+        ActivityLog.user_id == user_id
+    ).order_by(ActivityLog.timestamp.desc()).limit(limit)
+    return session.exec(statement).all()
+

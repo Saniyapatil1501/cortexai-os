@@ -10,14 +10,6 @@ os.environ["FLAGS_use_onednn"] = "0"
 os.environ["FLAGS_use_mkldnn"] = "0"
 os.environ["PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT"] = "0"
 
-# Graceful PaddleOCR imports
-PADDLE_AVAILABLE = False
-try:
-    from paddleocr import PaddleOCR
-    PADDLE_AVAILABLE = True
-except ImportError:
-    pass
-
 class ScreenVisionProcessor:
     def __init__(self):
         self.ocr_engine = None
@@ -27,15 +19,18 @@ class ScreenVisionProcessor:
         """Initializes PaddleOCR only when required to save memory."""
         if self.is_initialized:
             return
-        if PADDLE_AVAILABLE:
-            try:
-                # Load English and Devanagari layout models
-                self.ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", enable_mkldnn=False)
-                self.is_initialized = True
-            except Exception as e:
-                print(f"Failed to load PaddleOCR engine: {str(e)}", flush=True)
-        else:
-            print("PaddleOCR is not installed. Skipping OCR text extraction.", flush=True)
+        try:
+            print("[OCR] Lazy importing PaddleOCR...", flush=True)
+            from paddleocr import PaddleOCR
+            print("[OCR] Loading English and Devanagari layout models...", flush=True)
+            # Load English and Devanagari layout models
+            self.ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", enable_mkldnn=False)
+            self.is_initialized = True
+            print("[OCR] PaddleOCR engine initialized successfully.", flush=True)
+        except ImportError:
+            print("[OCR] PaddleOCR is not installed. Skipping OCR text extraction.", flush=True)
+        except Exception as e:
+            print(f"[OCR] Failed to load PaddleOCR engine: {str(e)}", flush=True)
 
     def preprocess_image(self, pil_image: Image.Image) -> np.ndarray:
         """

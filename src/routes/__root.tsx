@@ -172,11 +172,11 @@ function RootComponent() {
 
   return (
     <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
-      <CortexAuthProvider>
-        <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={queryClient}>
+        <CortexAuthProvider>
           <Outlet />
-        </QueryClientProvider>
-      </CortexAuthProvider>
+        </CortexAuthProvider>
+      </QueryClientProvider>
     </ClerkProvider>
   );
 }

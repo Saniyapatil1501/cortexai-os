@@ -52,6 +52,49 @@ def create_db_and_tables():
                     conn.execute(text("ALTER TABLE documentchunk ADD COLUMN page_number INTEGER DEFAULT NULL"))
                     conn.commit()
                 print("[Database] Schema migration completed successfully.", flush=True)
+        
+        if "focussession" in inspector.get_table_names():
+            columns = [c["name"] for c in inspector.get_columns("focussession")]
+            if "status" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'status' column to 'focussession'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE focussession ADD COLUMN status VARCHAR DEFAULT 'running'"))
+                    conn.commit()
+            if "paused_at" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'paused_at' column to 'focussession'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE focussession ADD COLUMN paused_at TIMESTAMP DEFAULT NULL"))
+                    conn.commit()
+            if "focus_type" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'focus_type' column to 'focussession'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE focussession ADD COLUMN focus_type VARCHAR DEFAULT 'study'"))
+                    conn.commit()
+                print("[Database] FocusSession schema migrations completed successfully.", flush=True)
+
+        if "activitylog" in inspector.get_table_names():
+            columns = [c["name"] for c in inspector.get_columns("activitylog")]
+            if "end_timestamp" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'end_timestamp' column to 'activitylog'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE activitylog ADD COLUMN end_timestamp TIMESTAMP DEFAULT NULL"))
+                    conn.commit()
+            if "active_state" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'active_state' column to 'activitylog'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE activitylog ADD COLUMN active_state VARCHAR DEFAULT 'active'"))
+                    conn.commit()
+            if "focus_session_id" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'focus_session_id' column to 'activitylog'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE activitylog ADD COLUMN focus_session_id INTEGER DEFAULT NULL"))
+                    conn.commit()
+            if "reason" not in columns:
+                print("[Database] Programmatically migrating schema: Adding missing 'reason' column to 'activitylog'...", flush=True)
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE activitylog ADD COLUMN reason VARCHAR DEFAULT NULL"))
+                    conn.commit()
+                print("[Database] ActivityLog schema migrations completed successfully.", flush=True)
     except Exception as e:
         print(f"[Database] Error running schema migration check: {str(e)}", flush=True)
 

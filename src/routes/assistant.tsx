@@ -3,7 +3,7 @@ import { AppLayout } from "@/components/cortex/AppLayout";
 import { Card, PageHeader, Button } from "@/components/cortex/ui";
 import { motion } from "framer-motion";
 import { useEffect, useState, useRef } from "react";
-import { Send, Mic, Sparkles, Plus, History, Square, Volume2, VolumeX } from "lucide-react";
+import { Send, Mic, Sparkles, Plus, History, Square, Volume2, VolumeX, Camera, X } from "lucide-react";
 import { cortexClient } from "@/lib/api";
 import { useCortexAuth } from "@/hooks/useCortexAuth";
 
@@ -21,6 +21,7 @@ type Msg = {
   role: "user" | "ai";
   text: string;
   references?: { filename: string; page?: number; chunk?: number }[];
+  imageBase64?: string | null;
 };
 
 const modes = [
@@ -101,22 +102,33 @@ function AssistantPage() {
   const [selectedDocId, setSelectedDocId] = useState<string>("all");
   const [documents, setDocuments] = useState<any[]>([]);
   const [isOllamaOffline, setIsOllamaOffline] = useState(false);
+  
+  const [lensLoading, setLensLoading] = useState(false);
+  const [attachedImageBase64, setAttachedImageBase64] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
 
   // Check Ollama connection on mount
   useEffect(() => {
     cortexClient
       .getAssistantHealth()
       .then((res) => {
-        setIsOllamaOffline(res.status === "offline");
+        setIsOllamaOffline(false);
       })
       .catch(() => {
-        setIsOllamaOffline(true);
+        setIsOllamaOffline(false);
       });
   }, []);
 
   // Load chat history on mount and handle pending prompts
   useEffect(() => {
-    if (!userId || lastLoadedUserId.current === userId) return;
+    if (!userId) {
+      setMsgs([]);
+      setHistoryItems([]);
+      setDocuments([]);
+      lastLoadedUserId.current = null;
+      return;
+    }
+    if (lastLoadedUserId.current === userId) return;
 
     lastLoadedUserId.current = userId;
     cortexClient
@@ -306,14 +318,23 @@ function AssistantPage() {
   };
 
   const send = (text: string, playSpeech = false) => {
-    if (!text.trim() || !userId) return;
+    if ((!text.trim() && !attachedImageBase64) || !userId || isSending) return;
 
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
+    
+    setIsSending(true);
+    
+    const userText = text.trim() || "Analyze this image.";
+    const imgPayload = attachedImageBase64;
+    
+    console.log(`[ASSISTANT] attachedImageBase64 exists: ${!!imgPayload}`);
+    console.log(`[ASSISTANT] attachedImageBase64 length: ${imgPayload ? imgPayload.length : 0}`);
 
-    setMsgs((m) => [...m, { role: "user", text }, { role: "ai", text: "..." }]);
+    setMsgs((m) => [...m, { role: "user", text: userText, imageBase64: imgPayload }, { role: "ai", text: "..." }]);
     setInput("");
+    setAttachedImageBase64(null);
 
     setHistoryItems((prev) => {
       const next = [text, ...prev.filter((p) => p !== text)];
@@ -326,18 +347,17 @@ function AssistantPage() {
     cortexClient
       .chatStream(
         userId,
-        text,
+        userText,
         selectedMode,
         selectedDocId,
         (chunk) => {
           if (chunk === "OLLAMA_OFFLINE") {
-            setIsOllamaOffline(true);
             setMsgs((prev) => {
               const next = [...prev];
               if (next.length > 0 && next[next.length - 1].role === "ai") {
                 next[next.length - 1] = {
                   role: "ai",
-                  text: "OLLAMA_OFFLINE",
+                  text: "AI model is currently offline or unreachable. Please check if local Ollama is running.",
                 };
               }
               return next;
@@ -374,6 +394,7 @@ function AssistantPage() {
             return next;
           });
         },
+        imgPayload || undefined
       )
       .then(() => {
         if (playSpeech || voiceEnabled) {
@@ -393,6 +414,9 @@ function AssistantPage() {
           }
           return next;
         });
+      })
+      .finally(() => {
+        setIsSending(false);
       });
   };
 
@@ -415,6 +439,26 @@ function AssistantPage() {
     } else {
       setMsgs([{ role: "ai", text: "New conversation started. Ask me anything!" }]);
       setHistoryItems([]);
+    }
+  };
+
+  const handleLensTrigger = async () => {
+    const api = (window as any).cortexAPI;
+    if (!api || !api.startLens) {
+      alert("Lens screen capture is only supported inside the Desktop App container.");
+      return;
+    }
+
+    try {
+      setLensLoading(true);
+      const croppedBase64 = await api.startLens();
+      if (croppedBase64) {
+        setAttachedImageBase64(croppedBase64);
+      }
+    } catch (err) {
+      console.error("Lens trigger failed:", err);
+    } finally {
+      setLensLoading(false);
     }
   };
 
@@ -442,10 +486,7 @@ function AssistantPage() {
         }
       />
 
-      {isOllamaOffline ? (
-        <OllamaSetupWizard onRetry={() => setIsOllamaOffline(false)} />
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
           <Card padded={false} className="hidden lg:flex flex-col">
             <div className="flex items-center gap-2 border-b border-border px-4 py-3 text-sm">
               <History className="h-4 w-4 text-muted-foreground" /> History
@@ -558,9 +599,7 @@ function AssistantPage() {
                     }`}
                   >
                     {(() => {
-                      if (m.role === "ai" && m.text === "OLLAMA_OFFLINE") {
-                        return <OllamaSetupWizard onRetry={() => setIsOllamaOffline(false)} />;
-                      }
+
                       if (m.role === "ai") {
                         const parsedData = tryParseAIStructuredData(m.text);
                         if (parsedData) {
@@ -572,7 +611,18 @@ function AssistantPage() {
                           }
                         }
                       }
-                      return <p className="whitespace-pre-wrap select-text font-sans">{m.text}</p>;
+                      return (
+                        <div className="flex flex-col">
+                          {m.imageBase64 && (
+                            <img 
+                              src={m.imageBase64} 
+                              alt="Attached screenshot" 
+                              className="max-w-[400px] max-h-[300px] rounded-md object-contain mb-2 border border-border" 
+                            />
+                          )}
+                          <p className="whitespace-pre-wrap select-text font-sans">{m.text}</p>
+                        </div>
+                      );
                     })()}
 
                     {/* Document references citations */}
@@ -615,13 +665,27 @@ function AssistantPage() {
             </div>
 
             {/* Composer */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                send(input);
-              }}
-              className="flex items-center gap-2 border-t border-border p-3"
-            >
+            <div className="border-t border-border p-3 space-y-2 bg-surface-1">
+              {attachedImageBase64 && (
+                <div className="relative inline-block border border-border rounded p-1 bg-surface-2 mb-2">
+                  <img src={attachedImageBase64} alt="Attached" className="h-16 w-auto object-cover rounded" />
+                  <button 
+                    type="button"
+                    onClick={() => setAttachedImageBase64(null)}
+                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 hover:bg-red-600 shadow cursor-pointer transition"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+              
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  send(input);
+                }}
+                className="flex items-center gap-2"
+              >
               <button
                 type="button"
                 onClick={toggleListening}
@@ -652,13 +716,22 @@ function AssistantPage() {
                 }
                 className="flex-1 rounded-md border border-border bg-surface-1 px-3.5 py-2.5 text-sm outline-none focus:border-foreground/30"
               />
-              <Button type="submit">
+              <button
+                type="button"
+                onClick={handleLensTrigger}
+                disabled={lensLoading}
+                className="grid h-10 w-10 place-items-center rounded-md border border-border bg-surface-1 text-muted-foreground hover:text-foreground transition cursor-pointer disabled:opacity-50"
+                title="Capture screen with Lens"
+              >
+                <Camera className="h-4 w-4" />
+              </button>
+              <Button type="submit" disabled={isSending || (!input.trim() && !attachedImageBase64)}>
                 <Send className="h-4 w-4" /> Send
               </Button>
             </form>
-          </Card>
+          </div>
+        </Card>
         </div>
-      )}
     </AppLayout>
   );
 }
@@ -838,10 +911,12 @@ function OllamaSetupWizard({ onRetry }: { onRetry: () => void }) {
     setChecking(true);
     try {
       const res = await cortexClient.getAssistantHealth();
-      if (res.status === "ok") {
+      if (res.status === "OLLAMA_ONLINE_MODEL_AVAILABLE" || res.status === "OPENAI_AVAILABLE") {
         onRetry();
+      } else if (res.status === "OLLAMA_ONLINE_MODEL_MISSING") {
+        alert(`Ollama is online, but model '${res.model_name || "qwen2.5-coder:3b"}' is not installed.\n\nPlease run 'ollama pull ${res.model_name || "qwen2.5-coder:3b"}' in your terminal.`);
       } else {
-        alert("Ollama is still offline. Please check that the application is running.");
+        alert("Ollama is still offline. Please check that local Ollama is running.");
       }
     } catch {
       alert("Failed to reach backend server.");

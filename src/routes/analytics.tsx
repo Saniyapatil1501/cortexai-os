@@ -59,7 +59,15 @@ function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setSummary(null);
+      setTrend([]);
+      setHours([]);
+      setDistr([]);
+      setHeatmap(defaultHeatmap);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     Promise.all([
       cortexClient.getActivitySummary(userId),

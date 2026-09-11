@@ -23,6 +23,11 @@ async function authedFetch(url: string, options: RequestInit = {}): Promise<Resp
   }
 
   const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("cortex:session-expired"));
+    }
+  }
   if (!res.ok) {
     const errorText = await res.text().catch(() => "");
     throw new Error(`HTTP Error ${res.status}: ${errorText || res.statusText}`);
@@ -162,6 +167,13 @@ export const cortexClient = {
     return res.json();
   },
 
+  async logout(): Promise<{ status: string }> {
+    const res = await authedFetch(`${BASE_URL}/auth/logout`, {
+      method: "POST",
+    });
+    return res.json();
+  },
+
   async getUserSettings(userId: number): Promise<UserSettingsData> {
     const res = await authedFetch(`${BASE_URL}/auth/settings/${userId}`);
     return res.json();
@@ -182,6 +194,7 @@ export const cortexClient = {
     userId: number,
     intention: string,
     targetDurationSeconds?: number,
+    focusType?: string,
   ): Promise<FocusSession> {
     const res = await authedFetch(`${BASE_URL}/sessions/start`, {
       method: "POST",
@@ -189,6 +202,7 @@ export const cortexClient = {
         user_id: userId,
         intention,
         target_duration_seconds: targetDurationSeconds,
+        focus_type: focusType,
       }),
     });
     return res.json();
@@ -198,6 +212,7 @@ export const cortexClient = {
     sessionId: number,
     completed: boolean,
     distractionCount: number,
+    status?: string,
   ): Promise<any> {
     const res = await authedFetch(`${BASE_URL}/sessions/end`, {
       method: "POST",
@@ -205,11 +220,38 @@ export const cortexClient = {
         session_id: sessionId,
         completed,
         distraction_count: distractionCount,
+        status: status,
       }),
     });
     return res.json();
   },
+  async pauseFocusSession(sessionId: number): Promise<FocusSession> {
+    const res = await authedFetch(`${BASE_URL}/sessions/pause/${sessionId}`, {
+      method: "POST",
+    });
+    return res.json();
+  },
 
+  async resumeFocusSession(sessionId: number): Promise<FocusSession> {
+    const res = await authedFetch(`${BASE_URL}/sessions/resume/${sessionId}`, {
+      method: "POST",
+    });
+    return res.json();
+  },
+
+  async updateFocusSession(
+    sessionId: number,
+    data: { intention?: string; targetDurationSeconds?: number },
+  ): Promise<FocusSession> {
+    const res = await authedFetch(`${BASE_URL}/sessions/${sessionId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        intention: data.intention,
+        target_duration_seconds: data.targetDurationSeconds,
+      }),
+    });
+    return res.json();
+  },
   async getActiveFocusSession(userId: number): Promise<FocusSession | null> {
     const res = await authedFetch(`${BASE_URL}/sessions/active/${userId}`);
     if (res.status === 404) return null;
@@ -231,6 +273,22 @@ export const cortexClient = {
     return res.json();
   },
 
+  async getCurrentActivity(): Promise<{
+    app_name: string;
+    window_title: string;
+    category: string;
+    reason: string;
+    confidence: number;
+  }> {
+    const res = await authedFetch(`${BASE_URL}/activities/current`);
+    return res.json();
+  },
+
+  async getRecentActivityLogs(userId: number, limit: number = 15): Promise<any[]> {
+    const res = await authedFetch(`${BASE_URL}/activities/logs/recent/${userId}?limit=${limit}`);
+    return res.json();
+  },
+
   async getSuggestions(userId: number): Promise<string[]> {
     const res = await authedFetch(`${BASE_URL}/activities/suggestions/${userId}`);
     return res.json();
@@ -248,7 +306,7 @@ export const cortexClient = {
     return res.json();
   },
 
-  async getAppsAnalytics(
+  async getActiveApps(
     userId: number,
   ): Promise<{ name: string; time: string; pct: number; type: string }[]> {
     const res = await authedFetch(`${BASE_URL}/activities/analytics/apps/${userId}`);
@@ -308,6 +366,7 @@ export const cortexClient = {
     documentId: string,
     onChunk: (chunk: string) => void,
     onReferences?: (refs: { filename: string; page?: number; chunk?: number }[]) => void,
+    imageBase64?: string
   ): Promise<void> {
     const response = await authedFetch(`${BASE_URL}/assistant/chat`, {
       method: "POST",
@@ -316,6 +375,7 @@ export const cortexClient = {
         message,
         mode,
         document_id: documentId === "all" ? null : Number(documentId),
+        image_base64: imageBase64 || null
       }),
     });
 
@@ -495,8 +555,29 @@ export const cortexClient = {
     return res.json();
   },
 
-  async getAssistantHealth(): Promise<{ status: "ok" | "offline" }> {
+  async getAssistantHealth(): Promise<{
+    status: string;
+    model_name?: string;
+    models_available?: string[];
+  }> {
     const res = await authedFetch(`${BASE_URL}/assistant/health`);
+    return res.json();
+  },
+
+  async analyzeLens(data: {
+    user_id: number;
+    image_base64: string;
+    action: string;
+    custom_prompt?: string;
+  }): Promise<{
+    status: string;
+    extracted_text: string;
+    result: string;
+  }> {
+    const res = await authedFetch(`${BASE_URL}/vision/lens`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
     return res.json();
   },
 };
