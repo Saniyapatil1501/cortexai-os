@@ -23,22 +23,41 @@ export const Route = createFileRoute("/focus")({
 });
 
 function FocusPage() {
-  const { user } = useCortexAuth();
+  const {
+    user,
+    activeSession,
+    running,
+    elapsed,
+    distractions,
+    activeState,
+    activeApp,
+    activeTitle,
+    activeCategory,
+    activeReason,
+    timelineEvents,
+    startFocusSession,
+    endFocusSession,
+    pauseFocusSession,
+    resumeFocusSession,
+    updateFocusSession,
+    resetFocusSession,
+    summary,
+  } = useCortexAuth();
+  
+  const todayStats = {
+    sessions: summary?.today?.sessions_count || 0,
+    focusMinutes: Math.round((summary?.today?.focus_seconds || 0) / 60),
+  };
+
   const userId = user?.user_id;
 
-  const [activeSession, setActiveSession] = useState<FocusSession | null>(null);
   const [intention, setIntention] = useState("Finish course assignments");
-  const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0); // seconds
-  const [distractions, setDistractions] = useState({ tabSwitch: 0, appSwap: 0, idle: 0 });
-  const [todayStats, setTodayStats] = useState({ sessions: 0, focusMinutes: 0 });
 
-  // Intelligent Context Classifier States
-  const [activeState, setActiveState] = useState<string>("UNKNOWN");
-  const [activeApp, setActiveApp] = useState<string>("System");
-  const [activeTitle, setActiveTitle] = useState<string>("Desktop Idle");
-  const [activeCategory, setActiveCategory] = useState<string>("unknown");
-  const [activeReason, setActiveReason] = useState<string>("Unclear signals");
+  useEffect(() => {
+    if (activeSession && activeSession.intention) {
+      setIntention(activeSession.intention);
+    }
+  }, [activeSession?.id, activeSession?.intention]);
 
   // Proactive assistance & vision states
   const [showStuckPopup, setShowStuckPopup] = useState(false);
@@ -84,45 +103,10 @@ function FocusPage() {
     top_distracting_contexts?: ContextItem[];
   }
 
-  // Timeline State
-  const [timelineEvents, setTimelineEvents] = useState<FocusSessionEventItem[]>([]);
-  const [lastSessionAnalytics, setLastSessionAnalytics] = useState<SessionAnalyticsItem | null>(
-    null,
-  );
+  const [lastSessionAnalytics, setLastSessionAnalytics] = useState<SessionAnalyticsItem | null>(null);
 
   // Total target duration
   const total = activeSession?.target_duration_seconds || 50 * 60;
-
-  // Fetch active session and stats on mount
-  useEffect(() => {
-    if (!userId) return;
-
-    cortexClient.getActiveFocusSession(userId).then((sess) => {
-      if (sess) {
-        setActiveSession(sess);
-        setIntention(sess.intention);
-        setRunning(true);
-        setElapsed(sess.duration_seconds || 0);
-        setDistractions({
-          tabSwitch: sess.distraction_count || 0,
-          appSwap: sess.app_swaps || 0,
-          idle: sess.idle_count || 0,
-        });
-
-        // Pull initial timeline events
-        cortexClient.getSessionTimeline(sess.id).then(setTimelineEvents).catch(console.error);
-      }
-    });
-
-    cortexClient.getActivitySummary(userId).then((sum) => {
-      if (sum.today) {
-        setTodayStats({
-          sessions: sum.today.sessions_count,
-          focusMinutes: Math.round(sum.today.focus_seconds / 60),
-        });
-      }
-    });
-  }, [userId]);
 
   // Stuck detection evaluation interval (every 10 seconds)
   useEffect(() => {
@@ -143,94 +127,38 @@ function FocusPage() {
     return () => clearInterval(stuckTimer);
   }, [running, activeSession, userId, dontAskAgain]);
 
-  // Update timer tick locally from active session sync
-  useEffect(() => {
-    if (!running || !activeSession || !userId) return;
-
-    const t = setInterval(() => {
-      cortexClient.getActiveFocusSession(userId).then((sess) => {
-        if (sess) {
-          setElapsed(sess.duration_seconds || 0);
-          setDistractions({
-            tabSwitch: sess.distraction_count || 0,
-            appSwap: sess.app_swaps || 0,
-            idle: sess.idle_count || 0,
-          });
-
-          // Sync timeline events
-          cortexClient.getSessionTimeline(sess.id).then(setTimelineEvents).catch(console.error);
-
-          // Find the active segment from the last timeline event
-          cortexClient.getSessionTimeline(sess.id).then((eventsList) => {
-            if (eventsList && eventsList.length > 0) {
-              const last = eventsList[eventsList.length - 1];
-              setActiveState(last.state);
-              setActiveApp(last.app_name || "System");
-              setActiveTitle(last.window_title || "Study Session");
-              setActiveCategory(last.classification || "unknown");
-              setActiveReason(last.classification_reason || "Continuous updates");
-            }
-          });
-
-          if (sess.duration_seconds >= total) {
-            clearInterval(t);
-            handleStop(true);
-          }
-        }
-      });
-    }, 2000); // Poll backend focus timer every 2 seconds for exact state alignment
-
-    return () => clearInterval(t);
-  }, [running, activeSession, userId, total]);
-
-  // Local 1-second clock to make the timer tick down smoothly in the UI
-  useEffect(() => {
-    if (!running || activeState !== "STUDY") return;
-
-    const interval = setInterval(() => {
-      setElapsed((prev) => prev + 1);
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [running, activeState]);
-
   const handleStart = () => {
     if (!userId) return;
-    cortexClient.startFocusSession(userId, intention, 50 * 60).then((sess) => {
-      setActiveSession(sess);
-      setRunning(true);
-      setElapsed(0);
-      setLastSessionAnalytics(null);
-      setDistractions({ tabSwitch: 0, appSwap: 0, idle: 0 });
-
-      // Fetch initial timeline events
-      cortexClient
-        .getSessionTimeline(sess.id)
-        .then((evts) => setTimelineEvents(evts as FocusSessionEventItem[]))
-        .catch(console.error);
-
-      const winObj = window as unknown as {
-        cortexAPI?: { sendNotification?: (t: string, b: string) => void };
-      };
-      if (winObj.cortexAPI?.sendNotification) {
-        winObj.cortexAPI.sendNotification(
-          "Focus Session Started",
-          `Goal target set: "${intention}"`,
-        );
-      }
-    });
+    setLastSessionAnalytics(null);
+    startFocusSession(intention, 50 * 60)
+      .then((sess) => {
+        const winObj = window as unknown as {
+          cortexAPI?: { sendNotification?: (t: string, b: string) => void };
+        };
+        if (winObj.cortexAPI?.sendNotification) {
+          winObj.cortexAPI.sendNotification(
+            "Focus Session Started",
+            `Goal target set: "${intention}"`,
+          );
+        }
+      })
+      .catch(console.error);
   };
 
-  const handleStop = (completed = false) => {
+  const handleStop = (completed = false, status?: string) => {
     if (!activeSession) return;
-    cortexClient
-      .endFocusSession(activeSession.id, completed, distractions.tabSwitch)
+    endFocusSession(completed, elapsed, status)
       .then((analytics) => {
         const winObj = window as unknown as {
           cortexAPI?: { sendNotification?: (t: string, b: string) => void };
         };
         if (winObj.cortexAPI?.sendNotification) {
-          if (completed) {
+          if (status === "skipped") {
+            winObj.cortexAPI.sendNotification(
+              "Focus Session Skipped",
+              "You skipped this focus session.",
+            );
+          } else if (completed) {
             winObj.cortexAPI.sendNotification(
               "Focus Target Completed!",
               "Great job finishing your productive study target!",
@@ -242,30 +170,16 @@ function FocusPage() {
             );
           }
         }
-
         setLastSessionAnalytics(analytics);
-        setActiveSession(null);
-        setRunning(false);
-        setElapsed(0);
-
-        if (userId) {
-          cortexClient.getActivitySummary(userId).then((sum) => {
-            if (sum.today) {
-              setTodayStats({
-                sessions: sum.today.sessions_count,
-                focusMinutes: Math.round(sum.today.focus_seconds / 60),
-              });
-            }
-          });
-        }
-      });
+      })
+      .catch(console.error);
   };
 
   const handleReset = () => {
     if (activeSession) {
       handleStop(false);
     } else {
-      setElapsed(0);
+      resetFocusSession();
       setLastSessionAnalytics(null);
     }
   };
@@ -498,14 +412,30 @@ function FocusPage() {
               </div>
             </div>
 
-            <div className="mt-8 flex gap-2">
-              <Button onClick={running ? () => handleStop(false) : handleStart}>
-                {running ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                {running ? "Stop session" : "Start session"}
-              </Button>
-              <Button variant="outline" onClick={handleReset}>
-                <RotateCcw className="h-4 w-4" /> Reset
-              </Button>
+            <div className="mt-8 flex gap-2 flex-wrap justify-center">
+              {!activeSession ? (
+                <Button onClick={handleStart}>
+                  <Play className="h-4 w-4 mr-1.5" /> Start Focus Session
+                </Button>
+              ) : (
+                <>
+                  <Button
+                    onClick={activeSession.status === "paused" ? resumeFocusSession : pauseFocusSession}
+                  >
+                    {activeSession.status === "paused" ? <Play className="h-4 w-4 mr-1.5" /> : <Pause className="h-4 w-4 mr-1.5" />}
+                    {activeSession.status === "paused" ? "Resume" : "Pause"}
+                  </Button>
+                  <Button variant="outline" onClick={() => handleStop(false)}>
+                    Stop
+                  </Button>
+                  <Button variant="outline" onClick={() => handleStop(false, "skipped")}>
+                    Skip
+                  </Button>
+                  <Button variant="outline" onClick={handleReset}>
+                    <RotateCcw className="h-4 w-4 mr-1.5" /> Reset
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -564,8 +494,20 @@ function FocusPage() {
             <input
               value={intention}
               onChange={(e) => setIntention(e.target.value)}
+              onBlur={() => {
+                if (activeSession && intention.trim()) {
+                  updateFocusSession({ intention: intention.trim() })
+                    .then(() => toast.success("Study Intention updated and saved."))
+                    .catch(console.error);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && intention.trim()) {
+                  e.currentTarget.blur();
+                }
+              }}
               className="w-full rounded-md border border-border bg-surface-1 px-3 py-2 text-sm outline-none focus:border-foreground/30"
-              disabled={running}
+              placeholder="E.g., Finish course assignments, Coding algorithms..."
             />
             <div className="mt-3 text-xs text-muted-foreground">
               Cortex will analyze your active workspace context relative to this target.

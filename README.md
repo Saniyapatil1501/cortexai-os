@@ -69,7 +69,9 @@ graph TD
 | **Backend Daemon** | [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/)                                  | High-performance asynchronous Python framework serving local endpoints with automatically generated OpenAPI documentation.              |
 | **ORM & Database** | [SQLModel](https://sqlmodel.tiangolo.com/) (SQLAlchemy + Pydantic v2)                                           | A unified syntax for defining database tables and API validation schemas, mapping directly to a local, lightweight SQLite instance.     |
 | **OS Integration** | [pywin32](https://pypi.org/project/pywin32/) + [psutil](https://psutil.readthedocs.io/)                         | Access to win32 system APIs to capture active window handles, thread ownership, process details, and track idle states.                 |
-| **AI Layer**       | [OpenAI SDK](https://github.com/openai/openai-python)                                                           | Asynchronous client supporting OpenAI's `gpt-4o-mini` and Google Gemini's `gemini-1.5-flash` via the Gemini OpenAI compatibility layer. |
+| **AI Layer**       | [Ollama](https://ollama.com/)                                                                                   | Local LLM execution supporting offline processing with models like `qwen2.5-coder:3b`.                                                  |
+| **OCR**            | [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) + Pillow/PIL                                             | Local text extraction from captured desktop screenshots to provide context to text-only LLMs.                                           |
+| **Authentication** | [Clerk](https://clerk.com/)                                                                                     | Secure user authentication and workspace profiles.                                                                                        |
 
 ---
 
@@ -86,15 +88,30 @@ graph TD
   - An interactive assistant with a reactive 3D Orb.
   - Automatically embeds your active window context, last 5 activity logs, and current focus intention into system prompts for real-time coaching.
   - Streams responses chunk-by-chunk using Server-Sent Events (SSE).
-  - Configurable fallback to a smart mock streamer when no API keys are provided.
 - **🔔 Smart Reminders Daemon**:
   - Custom recurrence configurations (e.g., "every 45m", "at 3:30 PM").
   - Evaluates system states in the background and fires native OS desktop notifications.
+- **🔍 Cortex Lens & OCR**:
+  - Screen Selection & Screenshot Capture.
+  - Attach images to the chat; uses PaddleOCR to extract text before sending the textual context to the local LLM when using a text-only model.
+- **🧠 Local LLM with Ollama**:
+  - Offline processing using Ollama (Current configured model: `qwen2.5-coder:3b`).
 - **⌨️ Raycast-Style Global Hotkey**:
   - Press `Ctrl + Alt + Space` (or `Cmd + Alt + Space` on macOS) to toggle/overlay the dashboard instantly from anywhere in the OS.
 - **💎 Dark-Mode Glassmorphism**:
   - Tailored color theme built with modern `oklch()` color spaces.
   - Custom grid background overlays, hover states, and smooth motion curves.
+
+---
+
+## 🔍 Cortex Lens Architecture
+
+When analyzing screenshots, CortexAI uses the following pipeline to process images locally without relying on external vision models:
+
+Screen Selection → Screenshot Capture → Base64 image encoding → Frontend sends to FastAPI → Backend decodes image → **PaddleOCR** extracts visible text → Extracted Text is appended to the Prompt → Prompt sent to **Ollama** → AI Response streams to UI.
+
+> **IMPORTANT:**
+> Cortex Lens uses OCR to extract text before sending the textual context to the local LLM when using a text-only model. `qwen2.5-coder:3b` does not directly understand images; it processes the text extracted by the OCR pipeline.
 
 ---
 

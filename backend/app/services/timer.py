@@ -28,11 +28,13 @@ class StudyTimerStateMachine:
         if not now:
             now = datetime.utcnow()
         category = classification["category"]  # 'study', 'distraction', 'idle', 'unknown'
+        if category in ["code", "coding"]:
+            category = "study"
         confidence = classification["confidence"]
         reason = classification["reason"]
 
         # Fetch the last event for this session to determine the current state
-        stmt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == focus_session.id).order_by(FocusSessionEvent.end_time.desc())
+        stmt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == focus_session.id).order_by(FocusSessionEvent.id.desc())
         last_event = session.exec(stmt).first()
 
         # If no event exists yet, start the session in STUDY state
@@ -89,8 +91,9 @@ class StudyTimerStateMachine:
                     last_event.duration = int((now - last_event.start_time).total_seconds())
                     session.add(last_event)
                 
-                # Accumulate verified focus time on the session
-                focus_session.duration_seconds += 1
+                # Accumulate verified focus time on the session based on wall time
+                added_seconds = max(0, int(time_since_last_update))
+                focus_session.duration_seconds += added_seconds
                 session.add(focus_session)
                 session.commit()
             else:
@@ -127,7 +130,7 @@ class StudyTimerStateMachine:
                     stmt_prev = select(FocusSessionEvent).where(
                         FocusSessionEvent.session_id == focus_session.id,
                         FocusSessionEvent.state == "STUDY"
-                    ).order_by(FocusSessionEvent.end_time.desc())
+                    ).order_by(FocusSessionEvent.id.desc())
                     prev_study = session.exec(stmt_prev).first()
                     
                     if prev_study:
@@ -153,7 +156,7 @@ class StudyTimerStateMachine:
                 stmt_prev = select(FocusSessionEvent).where(
                     FocusSessionEvent.session_id == focus_session.id,
                     FocusSessionEvent.state == "STUDY"
-                ).order_by(FocusSessionEvent.end_time.desc())
+                ).order_by(FocusSessionEvent.id.desc())
                 prev_study = session.exec(stmt_prev).first()
                 if prev_study:
                     prev_study.end_time = now

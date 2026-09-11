@@ -51,6 +51,26 @@ function SettingsPage() {
 
   const fetchSettings = useCallback(() => {
     if (!userId) {
+      setSettings({
+        theme: "matte_black",
+        proactive_suggestions: true,
+        auto_summarize_sessions: true,
+        smart_distractions: true,
+        long_term_memory: false,
+        wake_word: true,
+        voice_replies: false,
+        voice_tone: "Calm",
+        focus_alerts: true,
+        reminders_alerts: true,
+        weekly_insights: true,
+        daily_focus_target: "5h",
+        weekly_study_target: "20h",
+        coding_target: "25h",
+        break_frequency: "every 50 min",
+        name: "",
+        role: "",
+        timezone: "",
+      });
       if (!isAuthLoading && !isBackendOffline) {
         setLoading(false);
       }
@@ -211,7 +231,7 @@ function SettingsPage() {
           {tab === "Appearance" && (
             <Card>
               <SectionHeader title="Appearance" desc="Choose how Cortex looks." />
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-3 mb-6">
                 {[
                   {
                     id: "matte_black",
@@ -243,6 +263,21 @@ function SettingsPage() {
                   </button>
                 ))}
               </div>
+              <ToggleRow
+                label="Enable Desktop Companion Widget / Pet"
+                desc="A floating desktop pet that stays available on top of normal applications."
+                checked={localStorage.getItem("cortex:enable-companion") !== "false"}
+                onChange={(val) => {
+                  localStorage.setItem("cortex:enable-companion", String(val));
+                  window.dispatchEvent(new CustomEvent("cortex:companion-enabled-change", { detail: val }));
+                  if (!val) {
+                    if ((window as any).cortexAPI?.hideCompanionWidget) {
+                      (window as any).cortexAPI.hideCompanionWidget();
+                    }
+                  }
+                  toast.success(val ? "Desktop Companion enabled" : "Desktop Companion disabled");
+                }}
+              />
             </Card>
           )}
 

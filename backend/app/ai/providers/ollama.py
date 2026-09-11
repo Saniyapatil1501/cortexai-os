@@ -3,7 +3,7 @@ import json
 import urllib.request
 import urllib.error
 import asyncio
-from typing import AsyncGenerator, List, Dict
+from typing import AsyncGenerator, List, Dict, Optional
 from app.ai.base import BaseLLM
 
 class OllamaLLM(BaseLLM):
@@ -11,10 +11,25 @@ class OllamaLLM(BaseLLM):
         self.model_name = os.getenv("OLLAMA_MODEL", model_name)
         self.base_url = os.getenv("OLLAMA_BASE_URL", base_url).rstrip("/")
 
-    def _build_messages(self, prompt: str, context: str, history: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _get_vision_fallback_model(self) -> str:
+        url = f"{self.base_url}/api/tags"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                models = [m["name"] for m in data.get("models", [])]
+                vision_models = ["llama3.2-vision", "llava", "moondream", "minicpm-v", "llava-phi3"]
+                for v in vision_models:
+                    for m in models:
+                        if v in m:
+                            return m
+                return "moondream"
+        except Exception:
+            return "moondream"
+
+    def _build_messages(self, prompt: str, context: str, history: List[Dict[str, str]], image_base64: Optional[str] = None) -> List[Dict[str, str]]:
         messages = []
         
-        # 1. System Prompt (will be overridden by chat modes if needed, otherwise default)
+        # 1. System Prompt
         system_content = "You are Cortex, a helpful context-aware academic study assistant overlay."
         if context:
             system_content += f"\n\nCURRENT CONTEXT:\n{context}"
@@ -25,15 +40,24 @@ class OllamaLLM(BaseLLM):
         for msg in history:
             messages.append({"role": msg["role"], "content": msg["content"]})
             
-        # 3. User Message
-        messages.append({"role": "user", "content": prompt})
-        
+        # 3. User Message with optional base64 image attachment
+        user_msg = {"role": "user", "content": prompt}
+        if image_base64:
+            raw_base64 = image_base64.split(",", 1)[-1] if "," in image_base64 else image_base64
+            user_msg["images"] = [raw_base64]
+            
+        messages.append(user_msg)
         return messages
 
-    async def generate(self, prompt: str, context: str, history: List[Dict[str, str]]) -> str:
-        messages = self._build_messages(prompt, context, history)
+    async def generate(self, prompt: str, context: str, history: List[Dict[str, str]], image_base64: Optional[str] = None) -> str:
+        messages = self._build_messages(prompt, context, history, image_base64=image_base64)
+        
+        target_model = self.model_name
+        if image_base64:
+             target_model = self._get_vision_fallback_model()
+             
         payload = {
-            "model": self.model_name,
+            "model": target_model,
             "messages": messages,
             "stream": False,
             "options": {
@@ -51,7 +75,7 @@ class OllamaLLM(BaseLLM):
                 headers=headers, 
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=10) as res:
+            with urllib.request.urlopen(req, timeout=30) as res:
                 return json.loads(res.read().decode("utf-8"))
 
         try:
@@ -64,10 +88,15 @@ class OllamaLLM(BaseLLM):
             print(f"[OllamaProvider] Error: {str(e)}")
             raise e
 
-    async def stream(self, prompt: str, context: str, history: List[Dict[str, str]]) -> AsyncGenerator[str, None]:
-        messages = self._build_messages(prompt, context, history)
+    async def stream(self, prompt: str, context: str, history: List[Dict[str, str]], image_base64: Optional[str] = None) -> AsyncGenerator[str, None]:
+        messages = self._build_messages(prompt, context, history, image_base64=image_base64)
+        
+        target_model = self.model_name
+        if image_base64:
+             target_model = self._get_vision_fallback_model()
+             
         payload = {
-            "model": self.model_name,
+            "model": target_model,
             "messages": messages,
             "stream": True,
             "options": {
@@ -85,7 +114,7 @@ class OllamaLLM(BaseLLM):
                 headers=headers, 
                 method="POST"
             )
-            return urllib.request.urlopen(req, timeout=10)
+            return urllib.request.urlopen(req, timeout=30)
 
         try:
             # Open the stream in a background thread to avoid blocking the event loop
@@ -122,11 +151,31 @@ class OllamaLLM(BaseLLM):
             with urllib.request.urlopen(url, timeout=2) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 models = [m["name"] for m in data.get("models", [])]
+                if not models:
+                    return False
                 # Match name exactly or by prefix (e.g. qwen2.5-coder:3b matches qwen2.5-coder:3b)
                 model_exists = any(self.model_name in m or m in self.model_name for m in models)
                 if not model_exists:
-                    print(f"[OllamaProvider] Warning: Model '{self.model_name}' is not downloaded in Ollama. Models present: {models}")
-                return len(models) > 0
-        except Exception as e:
-            print(f"[OllamaProvider] Health check failed: {str(e)}")
+                    print(f"[OllamaProvider] Warning: Model '{self.model_name}' is not downloaded in Ollama. Falling back to '{models[0]}'.")
+                    self.model_name = models[0]
+                return True
+        except Exception:
             return False
+
+    def get_detailed_status(self) -> str:
+        url = f"{self.base_url}/api/tags"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                models = [m["name"] for m in data.get("models", [])]
+                if not models:
+                    return "OLLAMA_ONLINE_MODEL_MISSING"
+                    
+                model_exists = any(self.model_name in m or m in self.model_name for m in models)
+                if not model_exists:
+                    self.model_name = models[0]
+                return "OLLAMA_ONLINE_MODEL_AVAILABLE"
+        except urllib.error.URLError as e:
+            return "OLLAMA_OFFLINE"
+        except Exception:
+            return "UNKNOWN_ERROR"

@@ -1,10 +1,10 @@
 from typing import List, Union
-from sentence_transformers import SentenceTransformer
 
 class EmbeddingEngine:
     def __init__(self):
         self.model = None
         self._dimension = 384
+        self._cache = {}
 
     def load_model(self):
         """
@@ -12,6 +12,7 @@ class EmbeddingEngine:
         """
         if self.model is None:
             print("[EmbeddingEngine] Loading SentenceTransformer model 'all-MiniLM-L6-v2'...")
+            from sentence_transformers import SentenceTransformer
             # Automatically downloads from Hugging Face if not cached, requiring no API key
             self.model = SentenceTransformer("all-MiniLM-L6-v2")
             print(f"[EmbeddingEngine] Model loaded successfully. Dimension: {self._dimension}")
@@ -20,9 +21,15 @@ class EmbeddingEngine:
         """
         Generates a 384-dimensional embedding vector for a single text.
         """
+        if text in self._cache:
+            return self._cache[text]
         self.load_model()
         embedding = self.model.encode(text, convert_to_numpy=True)
-        return embedding.tolist()
+        vec = embedding.tolist()
+        if len(self._cache) > 2000:
+            self._cache.clear()
+        self._cache[text] = vec
+        return vec
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """

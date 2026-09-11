@@ -45,7 +45,10 @@ function RemindersPage() {
   const [interval, setIntervalVal] = useState("");
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setReminders([]);
+      return;
+    }
     cortexClient
       .getReminders(userId)
       .then((data) => {

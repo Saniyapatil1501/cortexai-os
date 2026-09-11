@@ -90,6 +90,14 @@ function StudyMaterialsPage() {
   };
 
   useEffect(() => {
+    if (!userId) {
+      setDocuments([]);
+      setSearchResults([]);
+      setChunks([]);
+      setSelectedDoc(null);
+      setLoading(false);
+      return;
+    }
     if (isBackendOffline) {
       setLoading(false);
       return;
@@ -218,18 +226,27 @@ function StudyMaterialsPage() {
     }
   };
 
-  const handleViewChunks = async (doc: DocumentItem, highlightIdx: number | null = null) => {
+  const handleViewChunks = async (
+    doc: DocumentItem | null | undefined,
+    highlightIdx: number | null = null,
+  ) => {
+    if (!doc || !doc.id) {
+      console.error("handleViewChunks: Invalid document object provided");
+      toast.error("Unable to view document details: Invalid document");
+      return;
+    }
     setSelectedDoc(doc);
     setChunksLoading(true);
     setHighlightedChunkIndex(highlightIdx);
     setModalOpen(true);
     try {
       const chunkData = await cortexClient.getDocumentChunks(doc.id);
-      setChunks(chunkData);
+      setChunks(Array.isArray(chunkData) ? chunkData : []);
     } catch (err) {
       console.error("Failed to retrieve document chunks:", err);
       toast.error("Failed to load document text chunks.");
       setModalOpen(false);
+      setChunks([]);
     } finally {
       setChunksLoading(false);
     }

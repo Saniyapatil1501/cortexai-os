@@ -9,15 +9,20 @@ from app.api.auth import verify_user_access
 
 router = APIRouter()
 
+def model_to_dict(model_obj) -> dict:
+    return {c.name: getattr(model_obj, c.name) for c in model_obj.__table__.columns}
+
 class SessionStart(BaseModel):
     user_id: int
     intention: str
     target_duration_seconds: Optional[int] = 1500
+    focus_type: Optional[str] = "study"
 
 class SessionEnd(BaseModel):
     session_id: int
     completed: bool
     distraction_count: int
+    status: Optional[str] = None # "completed", "skipped", "cancelled"
 
 class FeedbackCorrectionRequest(BaseModel):
     user_id: int
@@ -88,15 +93,16 @@ def start_session(data: SessionStart, session: Session = Depends(get_session), a
     verify_user_access(data.user_id, authorization, session)
     
     # Terminate active focus sessions
-    statement = select(FocusSession).where(FocusSession.user_id == data.user_id, FocusSession.completed == False)
+    statement = select(FocusSession).where(FocusSession.user_id == data.user_id, FocusSession.ended_at == None)
     active_sessions = session.exec(statement).all()
     for s in active_sessions:
-        s.completed = True
+        s.completed = False
+        s.status = "cancelled"
         s.ended_at = datetime.utcnow()
         session.add(s)
         
         # Close open event segments
-        stmt_evt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == s.id).order_by(FocusSessionEvent.end_time.desc())
+        stmt_evt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == s.id).order_by(FocusSessionEvent.id.desc())
         last_evt = session.exec(stmt_evt).first()
         if last_evt:
             last_evt.end_time = s.ended_at
@@ -107,7 +113,9 @@ def start_session(data: SessionStart, session: Session = Depends(get_session), a
         user_id=data.user_id,
         intention=data.intention,
         started_at=datetime.utcnow(),
-        target_duration_seconds=data.target_duration_seconds
+        target_duration_seconds=data.target_duration_seconds,
+        status="running",
+        focus_type=data.focus_type or "study"
     )
     session.add(focus_sess)
     session.commit()
@@ -129,7 +137,7 @@ def start_session(data: SessionStart, session: Session = Depends(get_session), a
     session.add(start_event)
     session.commit()
     
-    return focus_sess
+    return model_to_dict(focus_sess)
 
 @router.post("/end")
 def end_session(data: SessionEnd, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
@@ -142,18 +150,31 @@ def end_session(data: SessionEnd, session: Session = Depends(get_session), autho
     focus_sess.ended_at = datetime.utcnow()
     focus_sess.completed = data.completed
     
+    if data.status:
+        focus_sess.status = data.status
+    else:
+        focus_sess.status = "completed" if data.completed else "cancelled"
+    
     # Fetch previous segment and close it
-    stmt_evt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == focus_sess.id).order_by(FocusSessionEvent.end_time.desc())
+    stmt_evt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == focus_sess.id).order_by(FocusSessionEvent.id.desc())
     last_evt = session.exec(stmt_evt).first()
     if last_evt:
         last_evt.end_time = focus_sess.ended_at
         last_evt.duration = int((focus_sess.ended_at - last_evt.start_time).total_seconds())
         session.add(last_evt)
         
-    # Write final ended event segment
-    is_completed = focus_sess.duration_seconds >= focus_sess.target_duration_seconds
-    end_state = "TARGET_COMPLETED" if is_completed else "SESSION_ENDED"
+    is_completed = focus_sess.completed
     
+    if focus_sess.status == "skipped":
+        end_state = "SESSION_SKIPPED"
+        win_title = "Session Skipped"
+    elif is_completed:
+        end_state = "TARGET_COMPLETED"
+        win_title = "Target Reached"
+    else:
+        end_state = "SESSION_ENDED"
+        win_title = "Session Ended"
+        
     end_event = FocusSessionEvent(
         session_id=focus_sess.id,
         state=end_state,
@@ -161,10 +182,10 @@ def end_session(data: SessionEnd, session: Session = Depends(get_session), autho
         end_time=focus_sess.ended_at,
         duration=0,
         app_name="System",
-        window_title="Target Reached" if is_completed else "Session Ended",
+        window_title=win_title,
         classification="idle",
         confidence=1.0,
-        classification_reason="Session stopped manually."
+        classification_reason=f"Session closed manually with status {focus_sess.status}."
     )
     session.add(end_event)
     session.commit()
@@ -175,15 +196,85 @@ def end_session(data: SessionEnd, session: Session = Depends(get_session), autho
     
     session.add(focus_sess)
     session.commit()
-    session.refresh(focus_sess)
-    
-    res = focus_sess.dict()
+    res = model_to_dict(focus_sess)
     res.update(analytics)
     return res
 
+def close_stale_sessions(user_id: int, session: Session):
+    stmt = select(FocusSession).where(
+        FocusSession.user_id == user_id,
+        FocusSession.ended_at == None
+    )
+    active_sessions = session.exec(stmt).all()
+    for active_sess in active_sessions:
+        elapsed = (datetime.utcnow() - active_sess.started_at).total_seconds()
+        limit = max(14400, active_sess.target_duration_seconds + 7200)
+        if elapsed > limit:
+            active_sess.completed = True
+            active_sess.ended_at = datetime.utcnow()
+            session.add(active_sess)
+            
+            stmt_evt = select(FocusSessionEvent).where(FocusSessionEvent.session_id == active_sess.id).order_by(FocusSessionEvent.id.desc())
+            last_evt = session.exec(stmt_evt).first()
+            if last_evt:
+                last_evt.end_time = active_sess.ended_at
+                last_evt.duration = int((active_sess.ended_at - last_evt.start_time).total_seconds())
+                session.add(last_evt)
+                
+            end_event = FocusSessionEvent(
+                session_id=active_sess.id,
+                state="SESSION_ENDED",
+                start_time=active_sess.ended_at,
+                end_time=active_sess.ended_at,
+                duration=0,
+                app_name="System",
+                window_title="Session Ended",
+                classification="idle",
+                confidence=1.0,
+                classification_reason="Session closed automatically due to inactivity."
+            )
+            session.add(end_event)
+            session.commit()
+
+@router.post("/pause/{session_id}")
+def pause_session(session_id: int, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
+    focus_sess = session.get(FocusSession, session_id)
+    if not focus_sess:
+        raise HTTPException(status_code=404, detail="Focus session not found")
+    verify_user_access(focus_sess.user_id, authorization, session)
+    
+    if focus_sess.status == "running":
+        focus_sess.status = "paused"
+        focus_sess.paused_at = datetime.utcnow()
+        session.add(focus_sess)
+        session.commit()
+        session.refresh(focus_sess)
+    return model_to_dict(focus_sess)
+
+@router.post("/resume/{session_id}")
+def resume_session(session_id: int, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
+    focus_sess = session.get(FocusSession, session_id)
+    if not focus_sess:
+        raise HTTPException(status_code=404, detail="Focus session not found")
+    verify_user_access(focus_sess.user_id, authorization, session)
+    
+    if focus_sess.status == "paused" and focus_sess.paused_at:
+        from datetime import timedelta
+        pause_duration = (datetime.utcnow() - focus_sess.paused_at).total_seconds()
+        focus_sess.started_at = focus_sess.started_at + timedelta(seconds=pause_duration)
+        focus_sess.status = "running"
+        focus_sess.paused_at = None
+        session.add(focus_sess)
+        session.commit()
+        session.refresh(focus_sess)
+    return model_to_dict(focus_sess)
+
 @router.get("/active/{user_id}")
 def get_active_session(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
-    statement = select(FocusSession).where(FocusSession.user_id == user_id, FocusSession.completed == False)
+    # Close any stale sessions first
+    close_stale_sessions(user_id, session)
+    
+    statement = select(FocusSession).where(FocusSession.user_id == user_id, FocusSession.ended_at == None)
     active_sess = session.exec(statement).first()
     if not active_sess:
         return None
@@ -191,9 +282,16 @@ def get_active_session(user_id: int, session: Session = Depends(get_session), _ 
     # Calculate analytics on current active events segments
     analytics = calculate_session_analytics(active_sess.id, session)
     
-    res = active_sess.dict()
+    res = model_to_dict(active_sess)
     res.update(analytics)
-    res["duration_seconds"] = analytics["verified_focus_seconds"]
+    
+    # Calculate exact wall-clock elapsed duration
+    if active_sess.status == "paused" and active_sess.paused_at:
+        elapsed = int((active_sess.paused_at - active_sess.started_at).total_seconds())
+    else:
+        elapsed = int((datetime.utcnow() - active_sess.started_at).total_seconds())
+        
+    res["duration_seconds"] = max(0, elapsed)
     return res
 
 @router.get("/timeline/{session_id}")
@@ -225,6 +323,10 @@ def save_correction(data: FeedbackCorrectionRequest, session: Session = Depends(
     session.add(correction)
     session.commit()
     session.refresh(correction)
+    
+    from app.services.classifier import context_classifier
+    context_classifier.invalidate_user_cache(data.user_id)
+    
     return {"status": "success", "correction_id": correction.id}
 
 @router.get("/recent/{user_id}", response_model=List[FocusSession])
@@ -236,8 +338,29 @@ def get_recent_sessions(
 ):
     statement = select(FocusSession).where(
         FocusSession.user_id == user_id, 
-        FocusSession.completed == True
+        FocusSession.ended_at != None
     ).order_by(FocusSession.ended_at.desc()).limit(limit)
     return session.exec(statement).all()
+
+class SessionUpdate(BaseModel):
+    intention: Optional[str] = None
+    target_duration_seconds: Optional[int] = None
+
+@router.patch("/{session_id}")
+def update_session(session_id: int, data: SessionUpdate, session: Session = Depends(get_session), authorization: Optional[str] = Header(None)):
+    focus_sess = session.get(FocusSession, session_id)
+    if not focus_sess:
+        raise HTTPException(status_code=404, detail="Focus session not found")
+    verify_user_access(focus_sess.user_id, authorization, session)
+    
+    if data.intention is not None:
+        focus_sess.intention = data.intention
+    if data.target_duration_seconds is not None:
+        focus_sess.target_duration_seconds = data.target_duration_seconds
+        
+    session.add(focus_sess)
+    session.commit()
+    session.refresh(focus_sess)
+    return model_to_dict(focus_sess)
 
 

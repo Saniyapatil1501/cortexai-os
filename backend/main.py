@@ -65,18 +65,72 @@ tracker = None
 def on_startup():
     global tracker
     from app.services.tracker import ActivityTracker
-    from app.database import engine
+    from app.database import engine, get_session
+    from sqlmodel import Session, select
+    from app.models import FocusSession
+    from datetime import datetime
 
     create_db_and_tables()
+    
+    # Bounded Cleanup: Mark any abandoned, un-ended focus sessions from prior runs as cancelled/closed (if they are stale)
+    try:
+        with Session(engine) as session:
+            stmt = select(FocusSession).where(FocusSession.ended_at == None)
+            abandoned = session.exec(stmt).all()
+            cleaned_count = 0
+            for s in abandoned:
+                elapsed = (datetime.utcnow() - s.started_at).total_seconds()
+                limit = max(14400, s.target_duration_seconds + 7200)
+                if elapsed > limit:
+                    s.ended_at = datetime.utcnow()
+                    s.status = "cancelled"
+                    session.add(s)
+                    cleaned_count += 1
+            session.commit()
+            if cleaned_count:
+                print(f"CortexAPI Startup: Cleaned up {cleaned_count} abandoned focus sessions.", flush=True)
+    except Exception as e:
+        print(f"CortexAPI Startup: Warning: Failed to clean up abandoned sessions: {str(e)}", flush=True)
     
     # Launch tracker daemon on background thread with no initial user
     tracker = ActivityTracker(engine=engine, user_id=None)
     tracker.start()
     print("CortexAI DB initialized and ActivityTracker daemon started (waiting for user session sync).")
 
+    # Start Ollama if offline
+    import urllib.request
+    import subprocess
+    try:
+        urllib.request.urlopen("http://127.0.0.1:11434", timeout=1)
+    except Exception:
+        print("Ollama is offline. Starting Ollama daemon...", flush=True)
+        try:
+            # We use creationflags=0x08000000 (CREATE_NO_WINDOW) to hide the console on Windows
+            subprocess.Popen(["ollama", "serve"], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+        except Exception as e:
+            print(f"Warning: Could not auto-start Ollama: {e}", flush=True)
+
 @app.get("/")
 def read_root():
     return {"status": "online", "service": "CortexAI Desktop Daemon"}
 
+@app.on_event("shutdown")
+def on_shutdown():
+    global tracker
+    if tracker:
+        print("Stopping ActivityTracker thread...", flush=True)
+        tracker.stop()
+
+@app.post("/api/shutdown")
+def shutdown():
+    import os
+    import signal
+    print("[CortexAPI] Graceful shutdown requested.", flush=True)
+    global tracker
+    if tracker:
+        tracker.stop()
+    os.kill(os.getpid(), signal.SIGINT)
+    return {"status": "shutdown initiated"}
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=False)

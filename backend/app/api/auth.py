@@ -47,10 +47,6 @@ def get_clerk_jwks_keys():
         return None
 
 def verify_and_decode_clerk_token(token: str):
-    if token == "mock_audit_token":
-        print("[CortexAuth] Developer bypass: using mock_audit_token", flush=True)
-        return {"sub": "clerk_audit_12345"}
-        
     print("[CortexAuth] Decoding and verifying Clerk JWT token...", flush=True)
     jwks = get_clerk_jwks_keys()
     if not jwks:
@@ -102,10 +98,10 @@ def sync_tracker_user(user_id: int):
                 pass
 
 def verify_user_access(
-    user_id: int, 
+    user_id: Optional[int] = None, 
     authorization: Optional[str] = Header(None), 
     session: Session = Depends(get_session)
-):
+) -> int:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Authorization header is required")
         
@@ -117,11 +113,16 @@ def verify_user_access(
         
     statement = select(User).where(User.clerk_id == clerk_id)
     user = session.exec(statement).first()
-    if not user or user.id != user_id:
+    if not user:
+        raise HTTPException(status_code=403, detail="Access denied to requested user data")
+        
+    if user_id is not None and user.id != user_id:
         raise HTTPException(status_code=403, detail="Access denied to requested user data")
         
     # Synchronize tracker user_id proactively
-    sync_tracker_user(user_id)
+    sync_tracker_user(user.id)
+    
+    return user.id
 
 
 
@@ -250,7 +251,7 @@ def get_profile(user_id: int, session: Session = Depends(get_session), _ = Depen
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return user
+    return user.dict()
 
 @router.get("/settings/{user_id}", response_model=UserSettings)
 def get_user_settings(user_id: int, session: Session = Depends(get_session), _ = Depends(verify_user_access)):
@@ -288,4 +289,51 @@ def update_user_settings(user_id: int, data: UserSettingsUpdate, session: Sessio
     session.commit()
     session.refresh(settings)
     return settings
+
+@router.post("/logout")
+def logout(
+    authorization: Optional[str] = Header(None),
+    session: Session = Depends(get_session)
+):
+    print("[CortexAuth] /logout request received. Terminating backend session states.", flush=True)
+    if authorization and authorization.startswith("Bearer "):
+        try:
+            token = authorization.split(" ")[1]
+            claims = verify_and_decode_clerk_token(token)
+            clerk_id = claims.get("sub")
+            if clerk_id:
+                statement = select(User).where(User.clerk_id == clerk_id)
+                user = session.exec(statement).first()
+                if user:
+                    # Terminate any active focus sessions for this user
+                    from app.models import FocusSession, FocusSessionEvent
+                    from datetime import datetime
+                    
+                    stmt_sess = select(FocusSession).where(
+                        FocusSession.user_id == user.id,
+                        FocusSession.completed == False
+                    )
+                    active_sessions = session.exec(stmt_sess).all()
+                    for s in active_sessions:
+                        s.completed = True
+                        s.ended_at = datetime.utcnow()
+                        session.add(s)
+                        
+                        # Close open event segments
+                        stmt_evt = select(FocusSessionEvent).where(
+                            FocusSessionEvent.session_id == s.id
+                        ).order_by(FocusSessionEvent.id.desc())
+                        last_evt = session.exec(stmt_evt).first()
+                        if last_evt:
+                            last_evt.end_time = s.ended_at
+                            last_evt.duration = int((s.ended_at - last_evt.start_time).total_seconds())
+                            session.add(last_evt)
+                    session.commit()
+        except Exception as e:
+            print(f"[CortexAuth] Error during logout backend processing: {e}", flush=True)
+            
+    # Always reset tracker's user_id to None
+    sync_tracker_user(None)
+    return {"status": "success"}
+
 
